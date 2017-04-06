@@ -1,0 +1,9 @@
+{
+  "name": "lib-xmark",
+  "version": "0.0.1",
+  "description": "persistent Map experiments",
+  "main": "src/index.js",
+  "repository": "https://github.com/rrbit-org/lib-xmark.git",
+  "author": "bngreer@wishfoundry.com",
+  "license": "MIT"
+}
