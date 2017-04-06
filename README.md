@@ -1,8 +1,15 @@
 
+<div style="display:block;position:relative;">
+    
+    <img alt="xmark" height="64" style="float:left;" 
+        src="https://cdn.rawgit.com/rrbit-org/lib-xmark/master/project/media/xmark.svg">
+        
+    <h1 style="float:left;">lib-xmark</h1>
+</div>
 
-<img alt="xmark" src="https://raw.githubusercontent.com/rrbit-org/lib-xmark/master/project/media/xmark.svg">
+<div style="clear:both; display:table;"></div>
 
-# lib-xmark
+
 exploration with persistent Maps
 
 Nothing to see here, move along
