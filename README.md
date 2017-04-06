@@ -1,10 +1,14 @@
 
-<div style="display:block;position:relative; clear:both">
-    <img alt="xmark" height="64" style="float:left;" 
-        src="https://cdn.rawgit.com/rrbit-org/lib-xmark/master/project/media/xmark.svg">
-    <h1 style="float:left;">lib-xmark</h1>
-</div>
-<div style="clear:both; display:table;"></div>
+<table>
+  <tr>
+    <td>
+      <img alt="xmark" height="64" src="https://cdn.rawgit.com/rrbit-org/lib-xmark/master/project/media/xmark.svg">
+    </td>
+    <td>
+      <h1>lib-xmark</h1>
+    </td>
+  </tr>
+</table>
 
 
 exploration with persistent Maps
