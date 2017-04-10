@@ -1,4 +1,4 @@
-import {hash} from './hash'
+import {hash as hashMe} from '../hash'
 import {NodeIterator} from './NodeIterator'
 
 // = helpers ==============================================================================
@@ -106,10 +106,10 @@ const bitmapNodeIndex = fromBitmap
  */
 class Transaction {
 	static reset(transaction) {
-		if (!ttransactionr) return;
-		if (transaction.isLengthDifferent) {
-			delete transaction.isLengthDifferent
-		}
+		if (!transaction) return;
+
+		delete transaction.isLengthDifferent;
+
 		return transaction
 	}
 	static isAllowedToEdit(node, transaction)
@@ -170,7 +170,7 @@ class IndexedNode<K, V> {
 	}
 
 	_copyAndSet(edit, idx, val) {
-		if (edit.isAllowedToEdit(this.edit)) {
+		if (Transaction.isAllowedToEdit(this.edit, edit)) {
 			this.array[idx] = val;
 			return this;
 		} else {
@@ -236,13 +236,12 @@ class IndexedNode<K, V> {
 			var current_key = this.array[(2 * idx)];
 
 			if (key == current_key) {
-				//todo: mutated but not tracked???
 				return this._copyAndSet(((2 * idx) + 1), val);
 			}
 
 			var current_val = this.array[(2 * idx) + 1];
-			var new_node = this._mergeTwoKeyValuePairs((shift + 5), hash(current_key), current_key, current_val, hash, key, val);
-			edit.setLengthChanged();
+			var new_node = this._mergeTwoKeyValuePairs((shift + 5), hashMe(current_key), current_key, current_val, hash, key, val);
+			Transaction.setLengthChanged(edit);
 
 			return this._copyAndMigrateToNode(bit, new_node);
 
@@ -259,7 +258,7 @@ class IndexedNode<K, V> {
 		}
 
 		// does not exist, insert as new key/value
-		return new IndexedNode(edit.setLengthChanged(),
+		return new IndexedNode(Transaction.setLengthChanged(edit),
 								(this.dataMap | bit),
 								this.nodeMap,
 								aInsertPair((2 * bitmapNodeIndex(this.dataMap, bit)), key, val, this.array));
@@ -301,7 +300,7 @@ class IndexedNode<K, V> {
 
 			// hash may be the same, but since we use a higher perf hashing... that doesn't mean it's really the same key
 			if (key == array[2 * index]) {
-				edit.setLengthChanged();
+				Transaction.setLengthChanged(edit);
 
 				if (popcount(dataMap) == 2 && (nodeMap == 0)) {
 					// var arr = index == 0 ? [this.array[2], this.array[3]] : [this.array[0], this.array[1]];
@@ -401,13 +400,13 @@ class CollisionNode<K, V> {
 		newArray = aClone(this.array);
 		newArray.push(key);
 		newArray.push(value);
-		edit.setLengthChanged();
+		Transaction.setLengthChanged(edit);
 		return new CollisionNode(edit, this.hash, this.length + 1, newArray);
 	}
 
 	_putǃ(index, key, value, edit) {
 		if(index == -1) {
-			edit.setLengthChanged();
+			Transaction.setLengthChanged(edit);
 			var newArray = aClone(this.array);
 			newArray.push(key);
 			newArray.push(value);
@@ -422,17 +421,16 @@ class CollisionNode<K, V> {
 
 	put(edit, shift, hash, key, val) {
 		var index = this.findIndex(key);
-		if (edit.isAllowedToEdit(this.edit)) { // todo: don't auto mutate
+		if (Transaction.isAllowedToEdit(this.edit, edit)) {
 			return this._putǃ(index, key, val, edit);
-		} else {
-			return this._put(index, key, val, edit);
 		}
+		return this._put(index, key, val, edit);
 	}
 
 	remove(edit, shift, hash, key) {
 		var index = this.findIndex(key);
 		if (index != -1) {
-			edit.setLengthChanged();
+			Transaction.setLengthChanged(edit);
 			switch (this.length) {
 				case 1:
 					return IndexedNode.EMPTY;
@@ -473,17 +471,19 @@ export const MapTrait = {
 	},
 
 	put(key, value, node, transaction) {
-		return (node || IndexedNode.EMPTY).put(Transaction.reset(transaction), 0, hash(key), value)
+		return (node || IndexedNode.EMPTY).put(Transaction.reset(transaction), 0, hashMe(key), value)
 	},
 
 	remove(key, node, transaction) {
-		if (!this.root) return this;
+		if (!node) return this;
 
-		return node.remove(Transaction.reset(transaction), 0, hash(key), key);
+		return node.remove(Transaction.reset(transaction), 0, hashMe(key), key);
 	},
 
 	get(key, node, notFound) {
-		return node.find(0, hash(key), key, notFound);
+		if (!node) return notFound;
+
+		return node.find(0, hashMe(key), key, notFound);
 	},
 
 	iterator(root, valueResolver) {
