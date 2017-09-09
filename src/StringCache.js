@@ -64,7 +64,7 @@ export default class StringLruCache {
 			return this._cache[key].value;
 
 		var result = factory(key)
-		this.add(result, result)
+		this.add(key, result)
 		return result
 	}
 }
