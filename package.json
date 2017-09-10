@@ -7,9 +7,12 @@
   "author": "bngreer@wishfoundry.com",
   "license": "MIT",
   "devDependencies": {
-    "babel-preset-es2015": "^6.24.1",
+    "babel-plugin-transform-object-rest-spread": "^6.26.0",
+    "babel-preset-env": "^1.6.0",
     "babel-preset-flow": "^6.23.0",
-    "jest": "^19.0.2"
+    "babel-preset-react": "^6.24.1",
+    "eslint-plugin-flowtype": "^2.35.1",
+    "jest": "^21.0.1"
   },
   "scripts": {
     "test": "./node_modules/.bin/jest"
