@@ -27,82 +27,70 @@ const Arrays = {
 		return dest;
 	}
 
-	, aClone(src: Array): Array {
-		var len = src.length;
-		var dest = new Array(len);
+	, aClone(list: Array): Array {
+		var len = list.length;
+		var copy = new Array(len);
 		for (var i = 0; len > i; i++) {
-			dest[i] = src[i];
+			copy[i] = list[i];
 		}
-		return dest;
+		return copy;
 	}
 
-	, aInsertPair(index, key, value, src): Array {
-		var dest = new Array(2 + src.length);
+	, aInsertPair(index, key, value, list: Array): Array {
+		var dest = new Array(2 + list.length);
 
-		this.aCopy(src, 0, dest, 0, index);
+		this.aCopy(list, 0, dest, 0, index);
 		dest[index] = key;
 		dest[index + 1] = value;
-		this.aCopy(src, index, dest, (2 + index), (src.length - index));
+		this.aCopy(list, index, dest, (2 + index), (list.length - index));
 		return dest;
 	}
 
-	, aRemovePair(index, array: Array): Array {
-		var newArray = new Array(array.length - 2);
-		this.aCopy(array, 0, newArray, 0, 2 * index);
-		this.aCopy(array, 2 * (index + 1), newArray, 2 * index, newArray.length - 2 * index);
+	, aRemovePair(index, list: Array): Array {
+		var newArray = new Array(list.length - 2);
+		this.aCopy(list, 0, newArray, 0, 2 * index);
+		this.aCopy(list, 2 * (index + 1), newArray, 2 * index, newArray.length - 2 * index);
 		return newArray;
 	}
 
-	, aUpdate(i: number, value: T, src: Array<T>): Array {
-		var dest = this.aClone(src);
+	, aUpdate(i: number, value: T, list: Array<T>): Array {
+		var dest = this.aClone(list);
 		dest[i] = value;
 		return dest;
-	}
-	, aInsert(index, value, array) {
-		var len = array.length + 1
-		var list = new Array(len)
-		for (var i = 0; index > i; i++) {
-			list[i] = array[i]
-		}
-		list[index] = value
-		for (var i = index; len > i; i++) {
-			list[i + 1] = array[i]
-		}
-		return
 	}
 
 	// pair array ops ----------------------------------
 
-	, dualRemove(index: number, array: Array): Array {
-		var newArray = new Array(array.length - 2);
-		this.aCopy(array, 0, newArray, 0, 2 * index);
-		this.aCopy(array, 2 * (index + 1), newArray, 2 * index, newArray.length - 2 * index);
-		return newArray;
+	, dualRemove(index: number, list: Array): Array {
+		var copy = new Array(list.length - 2);
+		this.aCopy(list, 0, copy, 0, 2 * index);
+		this.aCopy(list, 2 * (index + 1), copy, 2 * index, copy.length - 2 * index);
+		return copy;
 	}
 
-	, dualUpdate(index: number, key, value, items: Array) {
-		items = [...items]
-		items[index] = key
-		items[index + 1] = value
-		return items
+	, dualUpdate(index: number, key, value, list: Array) {
+		var copy = this.aClone(list)
+		copy[index] = key
+		copy[index + 1] = value
+		return copy
 	}
 
-	, dualInsert(index: number, key, value, src): Array {
+	, dualInsert(index: number, key, value, list: Array): Array {
 		var i = 0,
-			len = src.length,
-			dest = new Array(2 + len);
+			len = list.length,
+			copy = new Array(2 + len);
 
 		for (i = 0; index > i; i++) {
-			dest[i] = src[i];
+			copy[i] = list[i];
 		}
 
-		dest[index] = key;
-		dest[index + 1] = value;
+		copy[index] = key;
+		copy[index + 1] = value;
 
 		for (i = index; len > i; i++) {
-			dest[i + 2] = src[i];
+			copy[i + 2] = list[i];
 		}
-		return dest;
+		return copy;
 	}
 }
 
@@ -180,18 +168,19 @@ function MapEntry(key, value) {
 
 /**
  *
- * Node types:
- * IndexedNode
- * CollisionNode - multiple keys but 1 value
- * ArrayNode - internal node containing many children
- * LeafNode - a single value
+ * @param type - node type ('IndexedNode'|'CollisionNode')
+ * @param owner - any object which can represent the current
+ * transaction. used to detect if mutation optimizations are
+ * allowed
+ * @param data - an array keys, values and subnodes
+ * @param hash - used to calculate index of current concrete values
+ * @param altHash - used to calculate index of subnodes
+ * @param length
+ * @constructor
  */
-
-
-
-function Node<K,V>(type, owner?, items: Array<K|V>, hash, altHash, length) {
+function Node<K,V>(type, owner?, data: Array<K|V>, hash: number, altHash?: number, length?: number) {
 	this.edit = owner;
-	this.array = items;
+	this.data = data;
 	this.type = type;
 
 	if (type === 'IndexedNode') {
@@ -220,7 +209,7 @@ const NodeTrait = {
 	, ...Arrays
 
 	// useful when attempting to squash
-	, isSingle(node) {
+	, isSingle(node: Node) {
 		if (node.type === 'CollisionNode')
 			return node.length === 1;
 		return (this.popcount(node.dataMap) === 2) && (node.nodeMap === 0)
@@ -235,11 +224,11 @@ const NodeTrait = {
 	}
 
 	, _findRecurse(shift, hash, key, node, notFound) {
-		const array = node.array
+		const data = node.data
 
 		if (node.type === 'CollisionNode') {
-			for (var i = 0, len = node.length; len > i; i += 2) {
-				if (this.equals(key, array[i]))
+			for (var i = 0, len = data.length; len > i; i += 2) {
+				if (this.equals(key, data[i]))
 					return i;
 			}
 			return notFound
@@ -252,7 +241,7 @@ const NodeTrait = {
 		if ((node.dataMap & bit) !== 0) { // if in this node's data
 
 			var idx = 2 * this.fromBitmap(node.dataMap, bit);
-			return key === array[idx] ? array[idx + 1] : notFound;
+			return key === data[idx] ? data[idx + 1] : notFound;
 		}
 
 		if ((node.nodeMap & bit) === 0) // if not in a child node
@@ -262,16 +251,16 @@ const NodeTrait = {
 		return this._findRecurse((shift + 5)
 			, hash
 			, key
-			, array[array.length - 1 - this.fromBitmap(node.nodeMap, bit)]
+			, data[data.length - 1 - this.fromBitmap(node.nodeMap, bit)]
 			, notFound);
 	}
 
 	// = update/append =================================================================================
 
 	, _findMatchingKey(key, collisionNode) {
-		var { length, array } = collisionNode
+		var { length, data } = collisionNode
 		for (var i = 0; i < length; i += 2) {
-			if (this.equals(key, array[i])) {
+			if (this.equals(key, data[i])) {
 				return i;
 			}
 		}
@@ -280,24 +269,24 @@ const NodeTrait = {
 
 	, _updateValue(idx, value, node, edit) {
 		if (this.isAllowedToEdit(node.edit, edit)) {
-			node.array[idx] = value;
+			node.data[idx] = value;
 			return node;
 		}
-		return IndexedNode(edit, node.dataMap, node.nodeMap, this.aUpdate(idx, value, node.array));
+		return IndexedNode(edit, node.dataMap, node.nodeMap, this.aUpdate(idx, value, node.data));
 	}
 
 	, _copyAndMigrateToNode(edit, bit, child, node) {
-		var { array, nodeMap, dataMap } = node;
+		var { data, nodeMap, dataMap } = node;
 		var oldIndex = (2 * this.fromBitmap(dataMap, bit));
-		var newIndex = (array.length - 2 - this.fromBitmap(nodeMap, bit));
+		var newIndex = (data.length - 2 - this.fromBitmap(nodeMap, bit));
 
-		var squashed = new Array(array.length - 1);
+		var squashed = new Array(data.length - 1);
 		// drop first key + value
-		this.aCopy(array, 0, squashed, 0, oldIndex);
-		this.aCopy(array, (2 + oldIndex), squashed, oldIndex, (newIndex - oldIndex));
+		this.aCopy(data, 0, squashed, 0, oldIndex);
+		this.aCopy(data, (2 + oldIndex), squashed, oldIndex, (newIndex - oldIndex));
 		squashed[newIndex] = child;
 		// drop second key + value
-		this.aCopy(array, (2 + newIndex), squashed, (newIndex + 1), (array.length - 2 - newIndex));
+		this.aCopy(data, (2 + newIndex), squashed, (newIndex + 1), (data.length - 2 - newIndex));
 
 		return IndexedNode(edit, (dataMap ^ bit), (nodeMap | bit), squashed);
 	}
@@ -329,18 +318,17 @@ const NodeTrait = {
 
 	, _IndexedPut(shift, hash, key, value, node, edit) {
 		var bit = this.bitpos(hash, shift);
-		var { array, nodeMap, dataMap } = node;
-		// var array = node.array
+		var { data, nodeMap, dataMap } = node;
 
 		if ((dataMap & bit) !== 0) { // is existing key/value
 			var idx = 2 * this.fromBitmap(dataMap, bit);
-			var existingKey = array[idx];
+			var existingKey = data[idx];
 
 			if (key === existingKey) {
 				return this._updateValue(idx + 1, value, node, edit);
 			}
 
-			var oldValue = node.array[idx + 1];
+			var oldValue = node.data[idx + 1];
 			var newChild = this._mergeTwoKeyValuePairs(edit
 				, (shift + 5)
 				, createHash(existingKey)
@@ -356,8 +344,8 @@ const NodeTrait = {
 				, node);
 
 		} else if ((nodeMap & bit) !== 0) { // is in existing child node
-			var index = array.length - 1 - this.fromBitmap(nodeMap, bit);
-			var child = array[index];
+			var index = data.length - 1 - this.fromBitmap(nodeMap, bit);
+			var child = data[index];
 			var newChild = this.put(shift + 5, hash, key, value, child, edit);
 
 			return child === newChild ? node : this._updateValue(index, newChild, node, edit);
@@ -367,7 +355,7 @@ const NodeTrait = {
 		return IndexedNode(this.setLengthChanged(edit)
 			, (dataMap | bit)
 			, nodeMap
-			, this.aInsertPair((2 * this.fromBitmap(dataMap, bit)), key, value, array));
+			, this.aInsertPair((2 * this.fromBitmap(dataMap, bit)), key, value, data));
 	}
 
 	, _CollisionPut(shift, hash, key, value, node, edit) {
@@ -378,22 +366,22 @@ const NodeTrait = {
 			if (index === -1) {
 				this.setLengthChanged(edit);
 
-				node.array = this.dualInsert(node.array.length, key, value, node.array);
+				node.data = this.dualInsert(node.data.length, key, value, node.data);
 				node.length += 1;
-			} else if (node.array[index + 1] !== value) {
-				node.array[index + 1] = value;
+			} else if (node.data[index + 1] !== value) {
+				node.data[index + 1] = value;
 			}
 			return node;
 		}
 
 		// immutable put
 		if (index !== -1) {
-			if (node.array[index + 1] === value) { // value is same, do nothing
+			if (node.data[index + 1] === value) { // value is same, do nothing
 				return node;
 			}
-			return CollisionNode(edit, node.hash, (node.length + 1), this.aUpdate(index + 1, value, node.array));
+			return CollisionNode(edit, node.hash, (node.length + 1), this.aUpdate(index + 1, value, node.data));
 		}
-		newArray = [...node.array, key, value];
+		newArray = [...node.data, key, value];
 		this.setLengthChanged(edit);
 		return CollisionNode(edit, node.hash, node.length + 1, newArray);
 	}
@@ -410,13 +398,13 @@ const NodeTrait = {
 	, _IndexedRemove(shift, hash, key, node, edit) {
 		var index;
 		var bit = this.bitpos(hash, shift);
-		var { dataMap, nodeMap, array } = node
+		var { dataMap, nodeMap, data } = node
 
 		if ((dataMap & bit) !== 0) {
 			index = this.fromBitmap(dataMap, bit);
 
 			// hash may be the same, but since we use a higher perf hashing... that doesn't mean it's really the same key
-			if (key === array[2 * index]) {
+			if (key === data[2 * index]) {
 				this.setLengthChanged(edit);
 
 				if (this.popcount(dataMap) === 2 && (nodeMap === 0)) {
@@ -424,21 +412,21 @@ const NodeTrait = {
 					return IndexedNode(edit,
 						(shift === 0 ? dataMap ^ bit : this.bitpos(hash, 0)),
 						0, //nodeMap hash
-						(index === 0 ? array.slice(2, 4) : array.slice(0, 2)));
+						(index === 0 ? data.slice(2, 4) : data.slice(0, 2)));
 				}
 
 				return IndexedNode(edit
 					, dataMap ^ bit
 					, nodeMap
-					, this.dualRemove(2 * index, array));
+					, this.dualRemove(2 * index, data));
 			}
 			//no matching key
 			return node;
 		}
 
 		if ((nodeMap & bit) !== 0) {
-			index = array.length - 1 - this.fromBitmap(nodeMap, bit);
-			var child = array[index];
+			index = data.length - 1 - this.fromBitmap(nodeMap, bit);
+			var child = data[index];
 			var newChild = this.remove(shift + 5, hash, key, child, edit);
 
 			if (child !== newChild) {
@@ -453,11 +441,11 @@ const NodeTrait = {
 					return IndexedNode(edit
 						, dataMap | bit
 						, nodeMap ^ bit
-						, array
+						, data
 							.slice(0, newIndex)
-							.concat(newChild.array.slice(0,2))
-							.concat(array.slice(newIndex, index))
-							.concat(array.slice(index + 1)));
+							.concat(newChild.data.slice(0,2))
+							.concat(data.slice(newIndex, index))
+							.concat(data.slice(index + 1)));
 				}
 				return this._updateValue(edit, index, newChild, node);
 			}
@@ -481,11 +469,11 @@ const NodeTrait = {
 			case 1:
 				return EMPTY;
 			case 2:
-				var array = node.array;
-				var idx = (this.equals(key, array[0])) ? 2 : 0;
-				return this.put(0, hash, array[idx], array[(idx + 1)], EMPTY, edit);
+				var data = node.data;
+				var idx = (this.equals(key, data[0])) ? 2 : 0;
+				return this.put(0, hash, data[idx], data[(idx + 1)], EMPTY, edit);
 			default:
-				return CollisionNode(edit, hash, (node.length - 1), this.aRemovePair(node.array, (index / 2)));
+				return CollisionNode(edit, hash, (node.length - 1), this.aRemovePair(node.data, (index / 2)));
 		}
 
 	}
@@ -493,7 +481,7 @@ const NodeTrait = {
 	// = iterate =================================================================================
 
 	, kvreduce(fn, seed: T, node: Node): T {
-		const {array} = node
+		const {data} = node
 
 		if (node.type === 'IndexedNode') {
 			var entryLen = (2 * this.popcount(node.dataMap));
@@ -502,10 +490,10 @@ const NodeTrait = {
 			var i = 0;
 			while (i < nodeLen) {
 				if (i < entryLen) {
-					seed = fn(seed, array[i], array[i + 1]);
+					seed = fn(seed, data[i], data[i + 1]);
 					i = i + 2;
 				} else {
-					seed = this.kvreduce(fn, seed, array[i]);
+					seed = this.kvreduce(fn, seed, data[i]);
 					i = i + 1;
 				}
 			}
@@ -514,7 +502,7 @@ const NodeTrait = {
 
 			var i = 0;
 			while (i < len) {
-				seed = fn(seed, array[i], array[i + 1]);
+				seed = fn(seed, data[i], data[i + 1]);
 				i = i + 2;
 			}
 		}
