@@ -2,9 +2,6 @@ import {hash as createHash} from './hash'
 
 // = helpers ==============================================================================
 
-// SameValue algorithm
-const is = Object.is || ((x, y) =>
-	( x === y ? (x !== 0 || 1 / x === 1 / y) : (x !== x && y !== y)))
 
 function equals(k1, k2) {
 	if (k1 === null || k1 === undefined) return false;
@@ -15,7 +12,7 @@ function equals(k1, k2) {
 
 // = array helpers =========================================================================
 
-const Arrays = {
+var Arrays = {
 
 	aCopy(src: Array, srcPos: number, dest: Array, destPos: number, length: number): Array {
 		var i = 0;
@@ -97,7 +94,7 @@ const Arrays = {
 /* Bit Ops
  ***************************************************************************** */
 
-const Bitwise = {
+var Bitwise = {
 	/**
 	 Hamming weight. a.k.a popcount
 	 Taken from: http://jsperf.com/hamming-weight
@@ -209,8 +206,9 @@ function CollisionNode(owner, hash, length, items: Array): Node {
 }
 
 
-const Trie = {
+var Trie = {
 	equals
+	, createHash
 
 	// useful when attempting to squash
 	, isSingle(node: Node) {
@@ -222,41 +220,45 @@ const Trie = {
 	// = get value  =================================================================================
 
 	, lookup(key, node, notFound) {
-		if (!node) return notFound;
+		var i = 0,
+			bit = 0,
+			shift = 0,
+			hash = this.createHash(key),
+			nodeMap,
+			dataMap
 
-		return this._findRecurse(0, createHash(key), key, node, notFound);
-	}
+		while (node) {
+			var data = node.data
 
-	, _findRecurse(shift, hash, key, node, notFound) {
-		const data = node.data
-
-		if (node.type === 'CollisionNode') {
-			for (var i = 0, len = data.length; len > i; i += 2) {
-				if (this.equals(key, data[i]))
-					return i;
+			if (node.type === 'CollisionNode') {
+				return this._lookupCollision(key, data, notFound)
 			}
-			return notFound
+
+			nodeMap = node.nodeMap
+			dataMap = node.dataMap
+			// IndexedNode
+			bit = 1 << ((hash >>> shift) & 0x01f)
+
+			if ((dataMap & bit)) { // if in this node's data
+
+				i = 2 * this.hashFragment(dataMap, bit);
+				return key === data[i] ? data[i + 1] : notFound;
+			}
+
+			if (!(nodeMap & bit)) {
+				return notFound
+			}
+			node = data[data.length - 1 - this.hashFragment(nodeMap, bit)]
+			shift += 5
 		}
-
-		// - IndexedNode ------------------------
-
-		var bit = this.bitpos(hash, shift);
-
-		if ((node.dataMap & bit) !== 0) { // if in this node's data
-
-			var idx = 2 * this.hashFragment(node.dataMap, bit);
-			return key === data[idx] ? data[idx + 1] : notFound;
+		return notFound
+	}
+	, _lookupCollision(key, entries, notFound) {
+		for (var i = 0, len = entries.length; len > i; i += 2) {
+			if (key === entries[i])
+				return entries[i + 1];
 		}
-
-		if ((node.nodeMap & bit) === 0) // if not in a child node
-			return notFound
-
-
-		return this._findRecurse((shift + 5)
-			, hash
-			, key
-			, data[data.length - 1 - this.hashFragment(node.nodeMap, bit)]
-			, notFound);
+		return notFound
 	}
 
 	// = update/append =================================================================================
@@ -486,7 +488,7 @@ const Trie = {
 	// = iterate =================================================================================
 
 	, kvreduce(fn, seed: T, node: Node): T {
-		const {data} = node
+		var data = node.data
 
 		if (node.type === 'IndexedNode') {
 			var entryLen = (2 * this.popcount(node.dataMap));
@@ -515,7 +517,7 @@ const Trie = {
 	}
 
 	, iterator: function* iterator(node) {
-		const {data} = node
+		var data = node.data
 
 		if (node.type === 'IndexedNode') {
 			var entryLen = (2 * this.popcount(node.dataMap));
@@ -547,17 +549,17 @@ Object.assign(Trie, Transaction)
 Object.assign(Trie, Arrays)
 
 
-const EMPTY_ITERATOR = {
+var EMPTY_ITERATOR = {
 	next() {
 		return {done: true}
 	}
 };
 
-const EMPTY = IndexedNode(null, 0, 0, [])
+var EMPTY = IndexedNode(null, 0, 0, [])
 
 
 // create common reducer helpers once, to save creating a function on every call
-const Reducer = {
+var Reducer = {
 	// store common values on the reducer's seed/accumulator to avoid closures(faster)
 	FastFerry: function FastFerry(fn, seed) {
 		if (!(this instanceof FastFerry))
@@ -601,7 +603,7 @@ const Reducer = {
 	, foldValueFn(ferry, key, value) {}
 }
 
-export const Api = {
+export var Api = {
 	empty() {
 		return EMPTY;
 	}
@@ -635,7 +637,7 @@ export const Api = {
 	, lookup: Trie.lookup.bind(Trie)
 
 	, includes(key, trie) {
-		const NOT_FOUND = {}
+		var NOT_FOUND = {}
 		return Trie.lookup(key, trie, NOT_FOUND) !== NOT_FOUND
 	}
 

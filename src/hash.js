@@ -105,22 +105,26 @@ var hashObj = (function() {
 
 
 export function hash(o) {
-	if (o && typeof o.valueOf === 'function') {
-		o = o.valueOf();
+	var type = typeof o;
+
+	if (type === 'string') {
+		var len = o.length, hash = 0;
+		if (len > 16) return CACHE.getOrCreate(o, hashString);
+
+		for (var i = 0; len > i; i++) {
+			hash = 31 * hash + o.charCodeAt(i) | 0;
+		}
+		return hash >>> 1 & 0x40000000 | hash & 0xbfffffff
+
+	}
+	if (type === 'number') {
+		return hashNumber(o)
 	}
 	if (o === false || o === null || o === undefined) {
 		return 0;
 	}
-
 	if (o === true) {
 		return 1;
-	}
-	var type = typeof o;
-	if (type === 'number') {
-		return hashNumber(o)
-	}
-	if (type === 'string') {
-		return cachedHashString(o);
 	}
 	if (typeof o.hashCode === 'function') {
 		return o.hashCode();

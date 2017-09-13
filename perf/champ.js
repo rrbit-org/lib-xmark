@@ -85,11 +85,6 @@ StringLruCache.prototype.Entry = Entry;
 
 var CACHE = new StringLruCache();
 
-function cachedHashString(string) {
-	return string.length > 16 ? CACHE.getOrCreate(string, hashString) : hashString(string);
-}
-
-
 function hashString(string) {
 	var hash = 0;
 	for (var i = 0, len = string.length; len > i; i++) {
@@ -185,22 +180,26 @@ var hashObj = (function() {
 
 
 function hash(o) {
-	if (o && typeof o.valueOf === 'function') {
-		o = o.valueOf();
+	var type = typeof o;
+
+	if (type === 'string') {
+		var len = o.length, hash = 0;
+		if (len > 16) return CACHE.getOrCreate(o, hashString);
+
+		for (var i = 0; len > i; i++) {
+			hash = 31 * hash + o.charCodeAt(i) | 0;
+		}
+		return hash >>> 1 & 0x40000000 | hash & 0xbfffffff
+
+	}
+	if (type === 'number') {
+		return hashNumber(o)
 	}
 	if (o === false || o === null || o === undefined) {
 		return 0;
 	}
-
 	if (o === true) {
 		return 1;
-	}
-	var type = typeof o;
-	if (type === 'number') {
-		return hashNumber(o)
-	}
-	if (type === 'string') {
-		return cachedHashString(o);
 	}
 	if (typeof o.hashCode === 'function') {
 		return o.hashCode();
@@ -408,6 +407,7 @@ function CollisionNode(owner, hash$$1, items                 )                  
 
 const NodeTrait = {
 	equals
+	, createHash: hash
 	// , ...Arrays
 	// , ...Transactions
 	// , ...Bitwise
@@ -421,6 +421,50 @@ const NodeTrait = {
 
 	// = get value  =================================================================================
 
+	, lookup(key, node, notFound) {
+		var bit = 0,
+			shift = 0,
+			nodeMap = 0,
+			dataMap = 0,
+			hash$$1 = hash(key),
+			data,
+			entry;
+
+		while (node) {
+			data = node.data;
+
+			if (node.type === 'CollisionNode') {
+				return this._lookupCollision(key, data, notFound)
+			}
+
+			nodeMap = node.nodeMap;
+			dataMap = node.dataMap;
+			// IndexedNode
+			bit = 1 << ((hash$$1 >>> shift) & 0x01f);
+
+			if ((dataMap & bit)) { // if in this node's data
+
+				entry = data[this.hashFragment(dataMap, bit)];
+				return key === entry.key ? entry.value : notFound;
+			}
+
+			if (!(nodeMap & bit)) {
+				return notFound
+			}
+			node = data[data.length - 1 - this.hashFragment(nodeMap, bit)];
+			shift += 5;
+		}
+		return notFound
+	}
+	, _lookupCollision(key, entries, notFound) {
+		for (var i = 0, len = entries.length; len > i; i++) {
+			var entry = entries[i];
+			if (key === entry.key)
+				return entry.value;
+		}
+		return notFound
+	}
+
 	, find(key, node          , notFound ) {
 		if (!node) return notFound;
 
@@ -432,7 +476,7 @@ const NodeTrait = {
 			, entry;
 
 		if (node.type === 'CollisionNode') {
-			for (var i = 0, len = data.length; len > i; i += 2) {
+			for (var i = 0, len = data.length; len > i; i += 1) {
 				entry = data[i];
 				if (this.equals(key, entry.key))
 					return entry.value
@@ -725,7 +769,7 @@ const Api = {
 	}
 
 
-	, lookup: NodeTrait.find.bind(NodeTrait)
+	, lookup: NodeTrait.lookup.bind(NodeTrait)
 
 	, includes(key     , node          )          {
 		const NOT_FOUND = {};
@@ -761,6 +805,9 @@ const Api = {
 	// merge
 };
 
+// = helpers ==============================================================================
+
+
 function equals$1(k1, k2) {
 	if (k1 === null || k1 === undefined) return false;
 	if (k1 === k2) return true;
@@ -770,7 +817,7 @@ function equals$1(k1, k2) {
 
 // = array helpers =========================================================================
 
-const Arrays$1 = {
+var Arrays$1 = {
 
 	aCopy(src       , srcPos        , dest       , destPos        , length        )        {
 		var i = 0;
@@ -852,7 +899,7 @@ const Arrays$1 = {
 /* Bit Ops
  ***************************************************************************** */
 
-const Bitwise$1 = {
+var Bitwise$1 = {
 	/**
 	 Hamming weight. a.k.a popcount
 	 Taken from: http://jsperf.com/hamming-weight
@@ -964,8 +1011,9 @@ function CollisionNode$1(owner, hash$$1, length, items       )       {
 }
 
 
-const Trie = {
+var Trie = {
 	equals: equals$1
+	, createHash: hash
 
 	// useful when attempting to squash
 	, isSingle(node      ) {
@@ -977,41 +1025,45 @@ const Trie = {
 	// = get value  =================================================================================
 
 	, lookup(key, node, notFound) {
-		if (!node) return notFound;
+		var i = 0,
+			bit = 0,
+			shift = 0,
+			hash$$1 = this.createHash(key),
+			nodeMap,
+			dataMap;
 
-		return this._findRecurse(0, hash(key), key, node, notFound);
-	}
+		while (node) {
+			var data = node.data;
 
-	, _findRecurse(shift, hash$$1, key, node, notFound) {
-		const data = node.data;
-
-		if (node.type === 'CollisionNode') {
-			for (var i = 0, len = data.length; len > i; i += 2) {
-				if (this.equals(key, data[i]))
-					return i;
+			if (node.type === 'CollisionNode') {
+				return this._lookupCollision(key, data, notFound)
 			}
-			return notFound
+
+			nodeMap = node.nodeMap;
+			dataMap = node.dataMap;
+			// IndexedNode
+			bit = 1 << ((hash$$1 >>> shift) & 0x01f);
+
+			if ((dataMap & bit)) { // if in this node's data
+
+				i = 2 * this.hashFragment(dataMap, bit);
+				return key === data[i] ? data[i + 1] : notFound;
+			}
+
+			if (!(nodeMap & bit)) {
+				return notFound
+			}
+			node = data[data.length - 1 - this.hashFragment(nodeMap, bit)];
+			shift += 5;
 		}
-
-		// - IndexedNode ------------------------
-
-		var bit = this.bitpos(hash$$1, shift);
-
-		if ((node.dataMap & bit) !== 0) { // if in this node's data
-
-			var idx = 2 * this.hashFragment(node.dataMap, bit);
-			return key === data[idx] ? data[idx + 1] : notFound;
+		return notFound
+	}
+	, _lookupCollision(key, entries, notFound) {
+		for (var i = 0, len = entries.length; len > i; i += 2) {
+			if (key === entries[i])
+				return entries[i + 1];
 		}
-
-		if ((node.nodeMap & bit) === 0) // if not in a child node
-			return notFound
-
-
-		return this._findRecurse((shift + 5)
-			, hash$$1
-			, key
-			, data[data.length - 1 - this.hashFragment(node.nodeMap, bit)]
-			, notFound);
+		return notFound
 	}
 
 	// = update/append =================================================================================
@@ -1241,7 +1293,7 @@ const Trie = {
 	// = iterate =================================================================================
 
 	, kvreduce(fn, seed   , node      )    {
-		const {data} = node;
+		var data = node.data;
 
 		if (node.type === 'IndexedNode') {
 			var entryLen = (2 * this.popcount(node.dataMap));
@@ -1270,7 +1322,7 @@ const Trie = {
 	}
 
 	, iterator: function* iterator(node) {
-		const {data} = node;
+		var data = node.data;
 
 		if (node.type === 'IndexedNode') {
 			var entryLen = (2 * this.popcount(node.dataMap));
@@ -1302,11 +1354,11 @@ Object.assign(Trie, Transaction);
 Object.assign(Trie, Arrays$1);
 
 
-const EMPTY$1 = IndexedNode$1(null, 0, 0, []);
+var EMPTY$1 = IndexedNode$1(null, 0, 0, []);
 
 
 // create common reducer helpers once, to save creating a function on every call
-const Reducer = {
+var Reducer = {
 	// store common values on the reducer's seed/accumulator to avoid closures(faster)
 	FastFerry: function FastFerry(fn, seed) {
 		if (!(this instanceof FastFerry))
@@ -1350,7 +1402,7 @@ const Reducer = {
 	, foldValueFn(ferry, key, value) {}
 };
 
-const Api$1 = {
+var Api$1 = {
 	empty() {
 		return EMPTY$1;
 	}
@@ -1384,7 +1436,7 @@ const Api$1 = {
 	, lookup: Trie.lookup.bind(Trie)
 
 	, includes(key, trie) {
-		const NOT_FOUND = {};
+		var NOT_FOUND = {};
 		return Trie.lookup(key, trie, NOT_FOUND) !== NOT_FOUND
 	}
 

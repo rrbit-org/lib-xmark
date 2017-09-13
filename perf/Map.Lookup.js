@@ -12,11 +12,12 @@ var runSuite = require('./runSuite'),
 ;
 
 
-var suite = new Benchmark.Suite('compare add 2 pair');
 
-var SIZE = 8
+
+// var SIZE = 8
 // var SIZE = 16
-// var SIZE = 32
+var SIZE = 32
+// var SIZE = 128
 // var SIZE = 1024
 // var SIZE = 32768
 
@@ -64,22 +65,27 @@ var data = {
 			map = Entry.put('key' + i, 'val' + i, map)
 		return map
 	}()),
+	native:(function() {
+		var map = {}
+		for (var i = 0; SIZE > i; i++)
+			map['key' + i] = 'val' + i
+		return map
+	}()),
+	Map: (function() {
+		var map = new Map()
+		for (var i = 0; SIZE > i; i++)
+			map.set('key' + i, 'val' + i)
+		return map
+	}()),
 }
 
+var suite = new Benchmark.Suite('compare lookup performance');
 
 suite.add('immutable-js', function() {
 	for (var i = 0; SIZE > i; i++)
 		var value = data.fb.get('key' + i)
 })
 
-// suite.add('faucett', function() {
-// 	try {
-// 		for (var i = 0; SIZE > i; i++)
-// 			 var value = data.faucett.get('key' + i)
-// 	} catch(e) {
-// 		console.log(e)
-// 	}
-// })
 
 suite.add('mori', function() {
 	for (var i = 0; SIZE > i; i++)
@@ -108,4 +114,22 @@ suite.add('champ:entry', function() {
 		 var value = Entry.lookup('key' + i, map)
 })
 
+suite.add('js object', function() {
+	for (var i = 0; SIZE > i; i++)
+		 var value = data.native['key' + i]
+})
+
+suite.add('native Map', function() {
+	for (var i = 0; SIZE > i; i++)
+		 var value = data.Map.get('key' + i)
+})
+
+// suite.add('faucett', function() {
+// 	try {
+// 		for (var i = 0; SIZE > i; i++)
+// 			 var value = data.faucett.get('key' + i)
+// 	} catch(e) {
+// 		console.log(e)
+// 	}
+// })
 runSuite(suite)

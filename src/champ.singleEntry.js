@@ -191,6 +191,7 @@ function CollisionNode(owner, hash, items: Array<MapEntry>): CollisionNodeType {
 
 const NodeTrait = {
 	equals
+	, createHash
 	// , ...Arrays
 	// , ...Transactions
 	// , ...Bitwise
@@ -204,6 +205,50 @@ const NodeTrait = {
 
 	// = get value  =================================================================================
 
+	, lookup(key, node, notFound) {
+		var bit = 0,
+			shift = 0,
+			nodeMap = 0,
+			dataMap = 0,
+			hash = createHash(key),
+			data,
+			entry;
+
+		while (node) {
+			data = node.data
+
+			if (node.type === 'CollisionNode') {
+				return this._lookupCollision(key, data, notFound)
+			}
+
+			nodeMap = node.nodeMap
+			dataMap = node.dataMap
+			// IndexedNode
+			bit = 1 << ((hash >>> shift) & 0x01f)
+
+			if ((dataMap & bit)) { // if in this node's data
+
+				entry = data[this.hashFragment(dataMap, bit)];
+				return key === entry.key ? entry.value : notFound;
+			}
+
+			if (!(nodeMap & bit)) {
+				return notFound
+			}
+			node = data[data.length - 1 - this.hashFragment(nodeMap, bit)]
+			shift += 5
+		}
+		return notFound
+	}
+	, _lookupCollision(key, entries, notFound) {
+		for (var i = 0, len = entries.length; len > i; i++) {
+			var entry = entries[i]
+			if (key === entry.key)
+				return entry.value;
+		}
+		return notFound
+	}
+
 	, find(key, node: NodeType, notFound?) {
 		if (!node) return notFound;
 
@@ -215,7 +260,7 @@ const NodeTrait = {
 			, entry;
 
 		if (node.type === 'CollisionNode') {
-			for (var i = 0, len = data.length; len > i; i += 2) {
+			for (var i = 0, len = data.length; len > i; i += 1) {
 				entry = data[i]
 				if (this.equals(key, entry.key))
 					return entry.value
@@ -514,7 +559,7 @@ export const Api = {
 	}
 
 
-	, lookup: NodeTrait.find.bind(NodeTrait)
+	, lookup: NodeTrait.lookup.bind(NodeTrait)
 
 	, includes(key: any, node: NodeType): boolean {
 		const NOT_FOUND = {}
