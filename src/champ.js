@@ -212,7 +212,7 @@ const NodeTrait = {
 
 	// = get value  =================================================================================
 
-	, find(key, node, notFound) {
+	, lookup(key, node, notFound) {
 		if (!node) return notFound;
 
 		return this._findRecurse(0, createHash(key), key, node, notFound);
@@ -520,46 +520,55 @@ const EMPTY = IndexedNode(null, 0, 0, [])
 export const Api = {
 	empty() {
 		return EMPTY;
-	},
+	}
 
-	put(key, value, node = EMPTY, transaction) {
+	, of(key, value) {
+		return NodeTrait.put(0, createHash(key), key, value, node, null)
+	}
+
+	, put(key, value, node = EMPTY, transaction) {
 
 		return NodeTrait.put(0, createHash(key), key, value, node, Transaction.reset(transaction))
-	},
+	}
 
-	remove(key, node, transaction) {
+	, remove(key, node, transaction) {
 		if (!node) return this;
 
 		return NodeTrait.remove(0, createHash(key), key, node, Transaction.reset(transaction));
-	},
+	}
 
-	get: NodeTrait.find.bind(NodeTrait),
+	, lookup: NodeTrait.lookup.bind(NodeTrait)
 
-	includes(key, node) {
+	, includes(key, node) {
 		const NOT_FOUND = {}
-		return NodeTrait.find(key, node, NOT_FOUND) === NOT_FOUND
-	},
+		return NodeTrait.lookup(key, node, NOT_FOUND) === NOT_FOUND
+	}
 
-	iterator(root, valueResolver) {
+	, iterator(root, valueResolver) {
 		valueResolver = valueResolver || ((key, value) => value);
 		return (root && root.length) ? NodeIterator(root, valueResolver) : EMPTY_ITERATOR;
-	},
+	}
 
-	keyIterator(root) {
-		return this.iterator(root, (key, value) => key);
-	},
-
-	entryIterator(root) {
-		return this.iterator(root, (key, value) => MapEntry(key, value));
-	},
-
-	kvreduce: NodeTrait.kvreduce,
+	// , keyIterator(root) {
+	// 	return this.iterator(root, (key, value) => key);
+	// }
+	//
+	// , entryIterator(root) {
+	// 	return this.iterator(root, (key, value) => MapEntry(key, value));
+	// }
 
 	//todo: pretty sure reduce should yield values only
-	reduce(fn, seed, node) {
+	, reduce(fn, seed, node) {
 		return node.kvreduce((acc, key, value) =>
-			fn(acc, MapEntry(key, value)), seed);
+			fn(acc, value), seed);
 	}
+
+	, reduceWithKey: NodeTrait.kvreduce
+	// , map
+	// , mapWithKey
+	// , filter
+	// , filterWithKey
+
 
 	// keys: use reduce
 	// values: use reduce

@@ -514,7 +514,7 @@ export const Api = {
 	}
 
 
-	, get: NodeTrait.find.bind(NodeTrait)
+	, lookup: NodeTrait.find.bind(NodeTrait)
 
 	, includes(key: any, node: NodeType): boolean {
 		const NOT_FOUND = {}

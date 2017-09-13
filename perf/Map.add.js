@@ -14,7 +14,9 @@ var runSuite = require('./runSuite'),
 
 var suite = new Benchmark.Suite('compare add 2 pair');
 
-var SIZE = 256
+var SIZE = 32
+// var SIZE = 1024
+// var SIZE = 32768
 
 
 suite.add('immutable-js', function() {
