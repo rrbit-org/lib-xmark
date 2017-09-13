@@ -1,5 +1,4 @@
 import {hash as createHash} from './hash'
-import {NodeIterator} from './NodeIterator'
 
 // = helpers ==============================================================================
 
@@ -211,7 +210,7 @@ function CollisionNode(owner, hash, length, items: Array): Node {
 }
 
 
-const HAMT = {
+const Trie = {
 	equals
 
 	// useful when attempting to squash
@@ -505,7 +504,7 @@ const HAMT = {
 				}
 			}
 		} else { // Collision Node
-			var len = (2 * this.length);
+			var len = (2 * data.length);
 
 			var i = 0;
 			while (i < len) {
@@ -515,10 +514,38 @@ const HAMT = {
 		}
 		return seed;
 	}
+
+	, iterator: function* iterator(node) {
+		const {data} = node
+
+		if (node.type === 'IndexedNode') {
+			var entryLen = (2 * this.popcount(node.dataMap));
+			var nodeLen = entryLen + this.popcount(node.nodeMap);
+
+			var i = 0;
+			while (i < nodeLen) {
+				if (i < entryLen) {
+					yield MapEntry(data[i], data[i + 1]);
+					i = i + 2;
+				} else {
+					yield* iterator(data[i])
+					i = i + 1;
+				}
+			}
+		} else { // Collision Node
+			var len = (2 * data.length);
+
+			var i = 0;
+			while (i < len) {
+				yield MapEntry(data[i], data[i + 1]);
+				i = i + 2;
+			}
+		}
+	}
 }
-Object.assign(HAMT, Bitwise)
-Object.assign(HAMT, Transaction)
-Object.assign(HAMT, Arrays)
+Object.assign(Trie, Bitwise)
+Object.assign(Trie, Transaction)
+Object.assign(Trie, Arrays)
 
 
 const EMPTY_ITERATOR = {
@@ -538,32 +565,32 @@ const Reducer = {
 			return new FastFerry(fn);
 
 		this.hamt = EMPTY
-		this.trans = new Transaction()
+		this.trans = Transaction.start()
 		this.fn = fn
 		this.seed = seed
 	}
 
 	, mapFn(ferry, key, value) {
 
-		ferry.map = HAMT.put(0, createHash(key), key, ferry.fn(value), ferry.hamt, ferry.trans)
+		ferry.map = Trie.put(0, createHash(key), key, ferry.fn(value), ferry.hamt, ferry.trans)
 		return ferry
 	}
 	, mapWithKeyFn(ferry, key, value) {
 
-		ferry.map = HAMT.put(0, createHash(key), key, ferry.fn(key, value), ferry.hamt, ferry.trans)
+		ferry.map = Trie.put(0, createHash(key), key, ferry.fn(key, value), ferry.hamt, ferry.trans)
 		return ferry
 	}
 
 	, filterFn(ferry, key, value) {
 		if (ferry.fn(value))
-			ferry.map = HAMT.put(0, createHash(key), key, value, ferry.hamt, ferry.trans)
+			ferry.map = Trie.put(0, createHash(key), key, value, ferry.hamt, ferry.trans)
 
 		return ferry
 	}
 
 	, filterWithKeyFn(ferry, key, value) {
 		if (ferry.fn(key, value))
-			ferry.map = HAMT.put(0, createHash(key), key, value, ferry.hamt, ferry.trans)
+			ferry.map = Trie.put(0, createHash(key), key, value, ferry.hamt, ferry.trans)
 
 		return ferry
 	}
@@ -581,74 +608,69 @@ export const Api = {
 	}
 
 	, of(key, value) {
-		return HAMT.put(0, createHash(key), key, value, node, null)
+		return Trie.put(0, createHash(key), key, value, node, null)
+	}
+
+	, initialize(size, fn) {
+		var hamt = EMPTY
+		var trans = Transaction.start()
+
+		for (var i = 0; size > i; i++) {
+			var { key, value } = fn(i)
+			Trie.put(0, createHash(key), key, value, hamt, trans)
+		}
+
+		return hamt
 	}
 
 	, put(key, value, node = EMPTY, transaction?) {
 
-		return HAMT.put(0, createHash(key), key, value, node, Transaction.start(transaction))
+		return Trie.put(0, createHash(key), key, value, node, Transaction.start(transaction))
 	}
 
 	, remove(key, node, transaction) {
-		if (!node) return this;
 
-		return HAMT.remove(0, createHash(key), key, node, Transaction.start(transaction));
+		return Trie.remove(0, createHash(key), key, node, Transaction.start(transaction));
 	}
 
-	, lookup: HAMT.lookup.bind(HAMT)
+	, lookup: Trie.lookup.bind(Trie)
 
-	, includes(key, node) {
+	, includes(key, trie) {
 		const NOT_FOUND = {}
-		return HAMT.lookup(key, node, NOT_FOUND) === NOT_FOUND
+		return Trie.lookup(key, trie, NOT_FOUND) !== NOT_FOUND
 	}
 
-	, iterator(root, valueResolver) {
-		valueResolver = valueResolver || ((key, value) => value);
-		return (root && root.length) ? NodeIterator(root, valueResolver) : EMPTY_ITERATOR;
-	}
-
-	// , keyIterator(root) {
-	// 	return this.iterator(root, (key, value) => key);
-	// }
-	//
-	// , entryIterator(root) {
-	// 	return this.iterator(root, (key, value) => MapEntry(key, value));
-	// }
+	, iterator: Trie.iterator
 
 	//todo: pretty sure reduce should yield values only
-	, reduce(fn, seed, node) {
-		return HAMT.kvreduce(Reducer.reduceValueFn, Reducer.FastFerry(fn, seed), node);
+	, reduce(fn, seed, trie) {
+		return Trie.kvreduce(Reducer.reduceValueFn, Reducer.FastFerry(fn, seed), trie).seed
 	}
 
-	, reduceWithKey: HAMT.kvreduce
+	, reduceWithKey: Trie.kvreduce
 
-	, map(fn, node) {
-		return HAMT.kvreduce(Reducer.mapFn, Reducer.FastFerry(fn), node).hamt
+	, map(fn, trie) {
+		return Trie.kvreduce(Reducer.mapFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
-	, mapWithKey(fn, node) {
-		return HAMT.kvreduce(Reducer.mapWithKeyFn, Reducer.FastFerry(fn), node).hamt
+	, mapWithKey(fn, trie) {
+		return Trie.kvreduce(Reducer.mapWithKeyFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
-	, filter(fn, node) {
-		return HAMT.kvreduce(Reducer.filterFn
+	, filter(fn, trie) {
+		return Trie.kvreduce(Reducer.filterFn
 			, Reducer.FastFerry(fn)
-			, node).hamt
+			, trie).hamt
 	}
-	, filterWithKey(fn, node) {
-		return HAMT.kvreduce(Reducer.filterWithKeyFn, Reducer.FastFerry(fn), node).hamt
+	, filterWithKey(fn, trie) {
+		return Trie.kvreduce(Reducer.filterWithKeyFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, merge(target, src) {
-		return HAMT.kvreduce((ferry, key, value) => {
-			ferry.hamt = HAMT.put(0, createHash(key), key, value, ferry.hamt, ferry.trans)
+		return Trie.kvreduce((ferry, key, value) => {
+			ferry.hamt = Trie.put(0, createHash(key), key, value, ferry.hamt, ferry.trans)
 			return ferry
 		}, { hamt: target, trans: Transaction() }, src).hamt
 	}
 
-
-	// keys: use reduce
-	// values: use reduce
-	// entries: use reduce
-	// merge
 };
