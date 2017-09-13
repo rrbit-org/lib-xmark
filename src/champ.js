@@ -136,7 +136,6 @@ function Transaction() {
 	if (!(this instanceof Transaction))
 		return new Transaction()
 }
-Transaction.prototype = null
 
 Object.assign(Transaction, {
 	reset(transaction) {

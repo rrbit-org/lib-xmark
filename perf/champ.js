@@ -725,7 +725,7 @@ const Api = {
 	}
 
 
-	, get: NodeTrait.find.bind(NodeTrait)
+	, lookup: NodeTrait.find.bind(NodeTrait)
 
 	, includes(key     , node          )          {
 		const NOT_FOUND = {};
@@ -760,102 +760,6 @@ const Api = {
 	// pick: use reduce
 	// merge
 };
-
-class NodeIterator  {
-
-	constructor(node, f) {
-
-		this.TUPLE = {value: null, done: false};
-		this.NULL = {};
-		this.format = f;
-
-// 		this.next_entry = NULL;
-//
-// 		this.nodes = new Array(7);
-// 		this.cursor_lengths = new Array(7);
-//
-//
-// 		this.f = f;
-//
-// 		var array = this.array = node.array
-// 		this.lvl = 0;
-// 		this.data_idx = 0;
-//
-// 		this.data_len = node.dataArity();
-// 		this.nodes[0] = node;
-// 		this.cursor_lengths[0] = node.nodeArity();
-//
-// 		if (this.data_len == 0) {
-// 			this.advance();
-// 		} else {
-// 			this.data_len -= 1;
-// 		}
-//
-// 		this.next_entry = this.f(array[(this.data_idx * 2)], array[((this.data_idx * 2) + 1)]);
-	}
-
-//
-// 	advance() {
-// 		if (this.data_idx < this.data_len) {
-// 			this.data_idx = this.data_idx + 1;
-// 			this.next_entry = this.f(array[(this.data_idx * 2)], array[((this.data_idx * 2) + 1)]);
-//
-// 			return true;
-// 		} else {
-// 			while (this.lvl >= 0) {
-// 				var node_idx = this.cursor_lengths[this.lvl];
-// 				if (node_idx == 0) {
-// 					this.lvl = this.lvl - 1;
-// 				} else {
-// 					this.cursor_lengths[this.lvl] = (node_idx - 1);
-//
-// 					var node = this.nodes[this.lvl].getNode(node_idx);
-// 					var has_nodes = node.hasNodes();
-// 					var new_lvl = has_nodes ? (this.lvl + 1) : this.lvl;
-//
-// 					if (has_nodes) {
-// 						this.nodes[new_lvl] = node;
-// 						this.cursor_lengths[new_lvl] = node.nodeArity();
-// 					}
-//
-// 					if (node.hasData()) {
-// 						this.array = node.array
-// 						this.lvl = new_lvl;
-// 						this.data_idx = 0;
-// 						this.data_len = (node.dataArity() - 1);
-// 						this.next_entry = this.f(array[(this.data_idx * 2)], array[((this.data_idx * 2) + 1)]);
-//
-// 						return true;
-// 					}
-//
-// 					lvl += 1;
-// 				}
-// 			}
-//
-// 			return false;
-// 		}
-// 	}
-//
-// 	hasNext() {
-// 		if (this.next_entry != NULL) {
-// 			return true;
-// 		}
-//
-// 		return advance();
-// 	}
-//
-	next() {
-		var ret = this.next_entry;
-		if (ret !== this.NULL) {
-			this.next_entry = NULL;
-			return ret;
-		} else if (this.advance()) {
-			return this.next();
-		}
-		throw new NoSuchElementException();
-	}
-
-}
 
 function equals$1(k1, k2) {
 	if (k1 === null || k1 === undefined) return false;
@@ -983,24 +887,34 @@ const Bitwise$1 = {
  * lightweight change tracking ferry for parent/child messaging
  * also used to indicate ownership, while minimizing memory leaks(vs using parent directly, which prevents GC)
  */
-const Transaction = {
+function Transaction() {
+	if (!(this instanceof Transaction))
+		return new Transaction()
+}
+
+Object.assign(Transaction, {
 	reset(transaction) {
 		if (!transaction) return;
 
 		delete transaction.isLengthDifferent;
 
 		return transaction
-	},
+	}
 
-	isAllowedToEdit(nodeOwner, transaction) {
+	, start(transaction) {
+		return transaction ? this.reset(transaction) : new Transaction();
+	}
+
+	, isAllowedToEdit(nodeOwner, transaction) {
 		return nodeOwner && transaction === nodeOwner;
-	},
+	}
 
-	setLengthChanged(transaction) {
-		this.isLengthDifferent = true;
+	, setLengthChanged(transaction) {
+
+		transaction.isLengthDifferent = true;
 		return transaction;
 	}
-};
+});
 
 
 // = class ==============================================================================
@@ -1050,7 +964,7 @@ function CollisionNode$1(owner, hash$$1, length, items       )       {
 }
 
 
-const NodeTrait$1 = {
+const Trie = {
 	equals: equals$1
 
 	// useful when attempting to squash
@@ -1062,7 +976,7 @@ const NodeTrait$1 = {
 
 	// = get value  =================================================================================
 
-	, find(key, node, notFound) {
+	, lookup(key, node, notFound) {
 		if (!node) return notFound;
 
 		return this._findRecurse(0, hash(key), key, node, notFound);
@@ -1120,7 +1034,7 @@ const NodeTrait$1 = {
 		return IndexedNode$1(edit, node.dataMap, node.nodeMap, this.aUpdate(idx, value, node.data));
 	}
 
-	, _copyAndMigrateToNode(edit, bit, child, node) {
+	, _copyAndMigrateToNode(bit, child, node, edit) {
 		var { data, nodeMap, dataMap } = node;
 		var oldIndex = (2 * this.hashFragment(dataMap, bit));
 		var newIndex = (data.length - 2 - this.hashFragment(nodeMap, bit));
@@ -1136,7 +1050,7 @@ const NodeTrait$1 = {
 		return IndexedNode$1(edit, (dataMap ^ bit), (nodeMap | bit), squashed);
 	}
 
-	, _mergeTwoKeyValuePairs(edit, shift, oldHash, oldKey, oldValue, hash$$1, key, value) {
+	, _mergeTwoKeyValuePairs(shift, oldHash, oldKey, oldValue, hash$$1, key, value, edit) {
 		if ((32 < shift) && (oldHash === hash$$1)) {
 			return CollisionNode$1(edit, oldHash, 2, [oldKey, oldValue, key, value]);
 		}
@@ -1147,21 +1061,21 @@ const NodeTrait$1 = {
 			return IndexedNode$1(edit
 				, 0
 				, this.bitpos(oldHash, shift)
-				, [ this._mergeTwoKeyValuePairs(edit
-					, (shift + 5)
+				, [ this._mergeTwoKeyValuePairs((shift + 5)
 					, oldHash
 					, oldKey
 					, oldValue
 					, hash$$1
 					, key
-					, value) ]);
+					, value
+					, edit) ]);
 		}
 
 		var arr = oldMask < mask ? [oldKey, oldValue, key, value] : [key, value, oldKey, oldValue];
 		return IndexedNode$1(edit, (this.bitpos(oldHash, shift) | this.bitpos(hash$$1, shift)), 0, arr);
 	}
 
-	, _IndexedPut(shift, hash$$1, key, value, node, edit) {
+	, _indexedPut(shift, hash$$1, key, value, node, edit) {
 		var bit = this.bitpos(hash$$1, shift);
 		var { data, nodeMap, dataMap } = node;
 
@@ -1174,19 +1088,19 @@ const NodeTrait$1 = {
 			}
 
 			var oldValue = node.data[idx + 1];
-			var newChild = this._mergeTwoKeyValuePairs(edit
-				, (shift + 5)
+			var newChild = this._mergeTwoKeyValuePairs((shift + 5)
 				, hash(existingKey)
 				, existingKey
 				, oldValue
 				, hash$$1
 				, key
-				, value);
+				, value
+				, edit);
 
-			return this._copyAndMigrateToNode(this.setLengthChanged(edit)
-				, bit
+			return this._copyAndMigrateToNode(bit
 				, newChild
-				, node);
+				, node
+				, this.setLengthChanged(edit));
 
 		} else if ((nodeMap & bit) !== 0) { // is in existing child node
 			var index = data.length - 1 - this.hashFragment(nodeMap, bit);
@@ -1203,7 +1117,7 @@ const NodeTrait$1 = {
 			, this.aInsertPair((2 * this.hashFragment(dataMap, bit)), key, value, data));
 	}
 
-	, _CollisionPut(shift, hash$$1, key, value, node, edit) {
+	, _collisionPut(shift, hash$$1, key, value, node, edit) {
 		var newArray;
 		var index = this._findMatchingKey(key, node);
 		// transient put
@@ -1233,14 +1147,14 @@ const NodeTrait$1 = {
 
 	, put(shift, hash$$1, key, value, node, edit) {
 		if (node.type === 'CollisionNode')
-			return this._CollisionPut(shift, hash$$1, key, value, node, edit)
+			return this._collisionPut(shift, hash$$1, key, value, node, edit)
 
-		return this._IndexedPut(shift, hash$$1, key, value, node, edit)
+		return this._indexedPut(shift, hash$$1, key, value, node, edit)
 	}
 
 	// = remove =================================================================================
 
-	, _IndexedRemove(shift, hash$$1, key, node, edit) {
+	, _indexedRemove(shift, hash$$1, key, node, edit) {
 		var index;
 		var bit = this.bitpos(hash$$1, shift);
 		var { dataMap, nodeMap, data } = node;
@@ -1301,9 +1215,10 @@ const NodeTrait$1 = {
 
 	, remove(shift        , hash$$1        , key, node      , edit )       {
 		if (node.type === 'IndexedNode')
-			return this._IndexedRemove(shift, hash$$1, key, node, edit);
+			return this._indexedRemove(shift, hash$$1, key, node, edit);
 
 		// Collision Node
+
 		var index = this._findMatchingKey(key,node);
 		if (index === -1)
 			return node;
@@ -1343,7 +1258,7 @@ const NodeTrait$1 = {
 				}
 			}
 		} else { // Collision Node
-			var len = (2 * this.length);
+			var len = (2 * data.length);
 
 			var i = 0;
 			while (i < len) {
@@ -1353,71 +1268,159 @@ const NodeTrait$1 = {
 		}
 		return seed;
 	}
-};
-Object.assign(NodeTrait$1, Bitwise$1);
-Object.assign(NodeTrait$1, Transaction);
-Object.assign(NodeTrait$1, Arrays$1);
 
+	, iterator: function* iterator(node) {
+		const {data} = node;
 
-const EMPTY_ITERATOR$1 = {
-	next() {
-		return {done: true}
+		if (node.type === 'IndexedNode') {
+			var entryLen = (2 * this.popcount(node.dataMap));
+			var nodeLen = entryLen + this.popcount(node.nodeMap);
+
+			var i = 0;
+			while (i < nodeLen) {
+				if (i < entryLen) {
+					yield MapEntry$1(data[i], data[i + 1]);
+					i = i + 2;
+				} else {
+					yield* iterator(data[i]);
+					i = i + 1;
+				}
+			}
+		} else { // Collision Node
+			var len = (2 * data.length);
+
+			var i = 0;
+			while (i < len) {
+				yield MapEntry$1(data[i], data[i + 1]);
+				i = i + 2;
+			}
+		}
 	}
 };
+Object.assign(Trie, Bitwise$1);
+Object.assign(Trie, Transaction);
+Object.assign(Trie, Arrays$1);
+
 
 const EMPTY$1 = IndexedNode$1(null, 0, 0, []);
+
+
+// create common reducer helpers once, to save creating a function on every call
+const Reducer = {
+	// store common values on the reducer's seed/accumulator to avoid closures(faster)
+	FastFerry: function FastFerry(fn, seed) {
+		if (!(this instanceof FastFerry))
+			return new FastFerry(fn);
+
+		this.hamt = EMPTY$1;
+		this.trans = Transaction.start();
+		this.fn = fn;
+		this.seed = seed;
+	}
+
+	, mapFn(ferry, key, value) {
+
+		ferry.map = Trie.put(0, hash(key), key, ferry.fn(value), ferry.hamt, ferry.trans);
+		return ferry
+	}
+	, mapWithKeyFn(ferry, key, value) {
+
+		ferry.map = Trie.put(0, hash(key), key, ferry.fn(key, value), ferry.hamt, ferry.trans);
+		return ferry
+	}
+
+	, filterFn(ferry, key, value) {
+		if (ferry.fn(value))
+			ferry.map = Trie.put(0, hash(key), key, value, ferry.hamt, ferry.trans);
+
+		return ferry
+	}
+
+	, filterWithKeyFn(ferry, key, value) {
+		if (ferry.fn(key, value))
+			ferry.map = Trie.put(0, hash(key), key, value, ferry.hamt, ferry.trans);
+
+		return ferry
+	}
+
+	, reduceValueFn(ferry, key, value) {
+		ferry.seed = ferry.fn(ferry.seed, value);
+		return ferry
+	}
+	, foldValueFn(ferry, key, value) {}
+};
 
 const Api$1 = {
 	empty() {
 		return EMPTY$1;
-	},
-
-	put(key, value, node = EMPTY$1, transaction) {
-
-		return NodeTrait$1.put(0, hash(key), key, value, node, Transaction.reset(transaction))
-	},
-
-	remove(key, node, transaction) {
-		if (!node) return this;
-
-		return NodeTrait$1.remove(0, hash(key), key, node, Transaction.reset(transaction));
-	},
-
-	get: NodeTrait$1.find.bind(NodeTrait$1),
-
-	includes(key, node) {
-		const NOT_FOUND = {};
-		return NodeTrait$1.find(key, node, NOT_FOUND) === NOT_FOUND
-	},
-
-	iterator(root, valueResolver) {
-		valueResolver = valueResolver || ((key, value) => value);
-		return (root && root.length) ? NodeIterator(root, valueResolver) : EMPTY_ITERATOR$1;
-	},
-
-	keyIterator(root) {
-		return this.iterator(root, (key, value) => key);
-	},
-
-	entryIterator(root) {
-		return this.iterator(root, (key, value) => MapEntry$1(key, value));
-	},
-
-	kvreduce: NodeTrait$1.kvreduce,
-
-	//todo: pretty sure reduce should yield values only
-	reduce(fn, seed, node) {
-		return node.kvreduce((acc, key, value) =>
-			fn(acc, MapEntry$1(key, value)), seed);
 	}
 
-	// keys: use reduce
-	// values: use reduce
-	// entries: use reduce
-	// map: use reduce
-	// filter: use reduce
-	// pick: use reduce
-	// merge
+	, of(key, value) {
+		return Trie.put(0, hash(key), key, value, node, null)
+	}
+
+	, initialize(size, fn) {
+		var hamt = EMPTY$1;
+		var trans = Transaction.start();
+
+		for (var i = 0; size > i; i++) {
+			var { key, value } = fn(i);
+			Trie.put(0, hash(key), key, value, hamt, trans);
+		}
+
+		return hamt
+	}
+
+	, put(key, value, node = EMPTY$1, transaction ) {
+
+		return Trie.put(0, hash(key), key, value, node, Transaction.start(transaction))
+	}
+
+	, remove(key, node, transaction) {
+
+		return Trie.remove(0, hash(key), key, node, Transaction.start(transaction));
+	}
+
+	, lookup: Trie.lookup.bind(Trie)
+
+	, includes(key, trie) {
+		const NOT_FOUND = {};
+		return Trie.lookup(key, trie, NOT_FOUND) !== NOT_FOUND
+	}
+
+	, iterator: Trie.iterator
+
+	//todo: pretty sure reduce should yield values only
+	, reduce(fn, seed, trie) {
+		return Trie.kvreduce(Reducer.reduceValueFn, Reducer.FastFerry(fn, seed), trie).seed
+	}
+
+	, reduceWithKey: Trie.kvreduce
+
+	, map(fn, trie) {
+		return Trie.kvreduce(Reducer.mapFn, Reducer.FastFerry(fn), trie).hamt
+	}
+
+	, mapWithKey(fn, trie) {
+		return Trie.kvreduce(Reducer.mapWithKeyFn, Reducer.FastFerry(fn), trie).hamt
+	}
+
+	, filter(fn, trie) {
+		return Trie.kvreduce(Reducer.filterFn
+			, Reducer.FastFerry(fn)
+			, trie).hamt
+	}
+	, filterWithKey(fn, trie) {
+		return Trie.kvreduce(Reducer.filterWithKeyFn, Reducer.FastFerry(fn), trie).hamt
+	}
+
+	, merge(target, src) {
+		return Trie.kvreduce((ferry, key, value) => {
+			ferry.hamt = Trie.put(0, hash(key), key, value, ferry.hamt, ferry.trans);
+			return ferry
+		}, { hamt: target, trans: Transaction() }, src).hamt
+	}
+
 };
 
 exports.Entry = Api;
