@@ -1,4 +1,4 @@
-import {Api} from './champ';
+import {Api} from './champ.singleEntry';
 
 var TEST_KEYS = [
 	'groak',

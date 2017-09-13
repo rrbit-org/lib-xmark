@@ -7,14 +7,26 @@
   "author": "bngreer@wishfoundry.com",
   "license": "MIT",
   "devDependencies": {
+    "@collectable/map": "^3.1.0",
+    "@nathanfaucett/immutable-hash_map": "^0.0.3",
     "babel-plugin-transform-object-rest-spread": "^6.26.0",
     "babel-preset-env": "^1.6.0",
     "babel-preset-flow": "^6.23.0",
     "babel-preset-react": "^6.24.1",
+    "benchmark": "^2.1.4",
     "eslint-plugin-flowtype": "^2.35.1",
-    "jest": "^21.0.1"
+    "flow-bin": "^0.54.1",
+    "hamt": "^2.2.0",
+    "immutable": "^3.8.1",
+    "jest": "^21.0.1",
+    "mori": "^0.3.2",
+    "rollup": "^0.49.3",
+    "rollup-plugin-flow": "^1.1.1"
   },
   "scripts": {
-    "test": "./node_modules/.bin/jest"
+    "test": "./node_modules/.bin/jest",
+    "test:se": "./node_modules/.bin/jest src/champ.singleEntry",
+    "test:d": "./node_modules/.bin/jest src/champ.test.js",
+    "bench:add": "./node_modules/.bin/rollup -c && node perf/Map.add.js"
   }
 }

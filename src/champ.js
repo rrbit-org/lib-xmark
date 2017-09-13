@@ -109,7 +109,7 @@ const Bitwise = {
 		return ((v + (v >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
 	}
 
-	, fromBitmap(bitmap, bit) {
+	, hashFragment(bitmap, bit) {
 		return this.popcount(bitmap & (bit - 1));
 	}
 
@@ -119,7 +119,6 @@ const Bitwise = {
 
 	, mask(hash, shift) {
 		return (hash >>> shift) & 0x01f;
-		// return (hash >>> shift) & 0b11111;
 	}
 
 	, bitpos(hash, shift) {
@@ -202,11 +201,7 @@ function CollisionNode(owner, hash, length, items: Array): Node {
 
 
 const NodeTrait = {
-
 	equals
-	, ...Bitwise
-	, ...Transaction
-	, ...Arrays
 
 	// useful when attempting to squash
 	, isSingle(node: Node) {
@@ -240,7 +235,7 @@ const NodeTrait = {
 
 		if ((node.dataMap & bit) !== 0) { // if in this node's data
 
-			var idx = 2 * this.fromBitmap(node.dataMap, bit);
+			var idx = 2 * this.hashFragment(node.dataMap, bit);
 			return key === data[idx] ? data[idx + 1] : notFound;
 		}
 
@@ -251,7 +246,7 @@ const NodeTrait = {
 		return this._findRecurse((shift + 5)
 			, hash
 			, key
-			, data[data.length - 1 - this.fromBitmap(node.nodeMap, bit)]
+			, data[data.length - 1 - this.hashFragment(node.nodeMap, bit)]
 			, notFound);
 	}
 
@@ -277,8 +272,8 @@ const NodeTrait = {
 
 	, _copyAndMigrateToNode(edit, bit, child, node) {
 		var { data, nodeMap, dataMap } = node;
-		var oldIndex = (2 * this.fromBitmap(dataMap, bit));
-		var newIndex = (data.length - 2 - this.fromBitmap(nodeMap, bit));
+		var oldIndex = (2 * this.hashFragment(dataMap, bit));
+		var newIndex = (data.length - 2 - this.hashFragment(nodeMap, bit));
 
 		var squashed = new Array(data.length - 1);
 		// drop first key + value
@@ -321,7 +316,7 @@ const NodeTrait = {
 		var { data, nodeMap, dataMap } = node;
 
 		if ((dataMap & bit) !== 0) { // is existing key/value
-			var idx = 2 * this.fromBitmap(dataMap, bit);
+			var idx = 2 * this.hashFragment(dataMap, bit);
 			var existingKey = data[idx];
 
 			if (key === existingKey) {
@@ -344,7 +339,7 @@ const NodeTrait = {
 				, node);
 
 		} else if ((nodeMap & bit) !== 0) { // is in existing child node
-			var index = data.length - 1 - this.fromBitmap(nodeMap, bit);
+			var index = data.length - 1 - this.hashFragment(nodeMap, bit);
 			var child = data[index];
 			var newChild = this.put(shift + 5, hash, key, value, child, edit);
 
@@ -355,12 +350,12 @@ const NodeTrait = {
 		return IndexedNode(this.setLengthChanged(edit)
 			, (dataMap | bit)
 			, nodeMap
-			, this.aInsertPair((2 * this.fromBitmap(dataMap, bit)), key, value, data));
+			, this.aInsertPair((2 * this.hashFragment(dataMap, bit)), key, value, data));
 	}
 
 	, _CollisionPut(shift, hash, key, value, node, edit) {
 		var newArray;
-		var index = this._findMatchingKey(key);
+		var index = this._findMatchingKey(key, node);
 		// transient put
 		if (this.isAllowedToEdit(node.edit, edit)) {
 			if (index === -1) {
@@ -401,7 +396,7 @@ const NodeTrait = {
 		var { dataMap, nodeMap, data } = node
 
 		if ((dataMap & bit) !== 0) {
-			index = this.fromBitmap(dataMap, bit);
+			index = this.hashFragment(dataMap, bit);
 
 			// hash may be the same, but since we use a higher perf hashing... that doesn't mean it's really the same key
 			if (key === data[2 * index]) {
@@ -425,7 +420,7 @@ const NodeTrait = {
 		}
 
 		if ((nodeMap & bit) !== 0) {
-			index = data.length - 1 - this.fromBitmap(nodeMap, bit);
+			index = data.length - 1 - this.hashFragment(nodeMap, bit);
 			var child = data[index];
 			var newChild = this.remove(shift + 5, hash, key, child, edit);
 
@@ -436,7 +431,7 @@ const NodeTrait = {
 					}
 
 					// if only one subnode, hoist values up one level
-					var newIndex = (2 * this.fromBitmap(dataMap, bit));
+					var newIndex = 2 * this.hashFragment(dataMap, bit);
 
 					return IndexedNode(edit
 						, dataMap | bit
@@ -447,7 +442,7 @@ const NodeTrait = {
 							.concat(data.slice(newIndex, index))
 							.concat(data.slice(index + 1)));
 				}
-				return this._updateValue(edit, index, newChild, node);
+				return this._updateValue(index, newChild, node, edit);
 			}
 		}
 
@@ -459,7 +454,7 @@ const NodeTrait = {
 			return this._IndexedRemove(shift, hash, key, node, edit);
 
 		// Collision Node
-		var index = this._findMatchingKey(key);
+		var index = this._findMatchingKey(key,node);
 		if (index === -1)
 			return node;
 
@@ -509,6 +504,9 @@ const NodeTrait = {
 		return seed;
 	}
 }
+Object.assign(NodeTrait, Bitwise)
+Object.assign(NodeTrait, Transaction)
+Object.assign(NodeTrait, Arrays)
 
 
 const EMPTY_ITERATOR = {

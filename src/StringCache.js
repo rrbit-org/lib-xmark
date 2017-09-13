@@ -1,22 +1,30 @@
+// @flow
+
+function Entry(value: any, key: string) {
+	this.value = value;
+	this.key = key;
+	this.time = Date.now()
+}
+
 /**
  *
  */
 export default class StringLruCache {
-	// optimized entry creation by creating a struct instead of an Object
-	Entry(value, key) {
-		this.value = value;
-		this.key = key;
-		this.time = Date.now()
-	}
+	_max: number
+	_batch: number
+	_cache: Object
+	_cacheLength: number
 
-	constructor(max = 255, batchSize = 10) {
+	// optimized entry creation by creating a struct instead of an Object
+
+	constructor(max:number = 255, batchSize:number = 10) {
 		this._max = max;
 		this._batch = batchSize
 		this._cache = {};
 		this._cacheLength = 0
 	}
 
-	_sortByDate(a, b) {
+	_sortByDate(a: any, b: any) {
 		return a.time - b.time
 	}
 
@@ -25,19 +33,20 @@ export default class StringLruCache {
 		var oldTime = Date.now();
 		var oldKey;
 
-		var items = []
+		var items:Array<Entry> = []
 		for (var key in cache) {
 			items.push(cache[key])
 		}
 		items.sort(this._sortByDate)
 			.slice(0, this._batch)
-			.return((cache, item) => {
+			.reduce((cache, item) => {
 				delete cache[item.key]
+				return cache
 			}, cache)
 
 	}
 
-	add(key, value) {
+	add(key: string, value: any) {
 		var _cache = this._cache;
 		this._cacheLength += 1
 		if (this._cacheLength === this._max) {
@@ -50,16 +59,16 @@ export default class StringLruCache {
 	}
 
 
-	has(key) {
+	has(key: string): boolean {
 		return key in this._cache
 	}
 
-	remove(key) {
+	remove(key: string) {
 		delete this._cache[key]
 		return this;
 	}
 
-	getOrCreate(key, factory) {
+	getOrCreate(key: string, factory: Function) {
 		if (key in this._cache)
 			return this._cache[key].value;
 
@@ -68,3 +77,5 @@ export default class StringLruCache {
 		return result
 	}
 }
+
+StringLruCache.prototype.Entry = Entry

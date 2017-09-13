@@ -1,0 +1,9 @@
+[include]
+./src/champ.singleEntry.js
+
+
+[options]
+all=false
+
+[ignore]
+.*node_modules/.*

@@ -38,11 +38,6 @@ function hashNumber(i) {
 // = object ================================================================================================
 var objHashUID = 0;
 
-// try and reuse hashes from other libs:
-// immutable.js: __immutablehash__
-// closure/mori: dynamically generated... :/
-
-
 var hashObj = (function() {
 	var OBJ_HASH_CACHE;
 	var supportsWeakMap = typeof WeakMap === 'function';
