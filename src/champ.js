@@ -1,5 +1,7 @@
+// @flow
 import {hash as createHash} from './hash'
 
+'use strict';
 // = helpers ==============================================================================
 
 
@@ -183,10 +185,8 @@ function MapEntry(key, value) {
  * @param length
  * @constructor
  */
-function Node<K,V>(type, owner?, data: Array<K|V>, hash: number, altHash?: number, length?: number) {
-	this.edit = owner;
-	this.data = data;
-	this.type = type;
+function Node<K,V>(type, owner: Transaction, data: Array<K|V>, hash: number, altHash: number, length: number) {
+
 
 	if (type === 'IndexedNode') {
 		this.dataMap = hash;
@@ -195,14 +195,18 @@ function Node<K,V>(type, owner?, data: Array<K|V>, hash: number, altHash?: numbe
 		this.hash = hash
 		this.length = length
 	}
+
+	this.data = data;
+	this.type = type;
+	this.edit = owner;
 }
 
 function IndexedNode(owner, dataMap: number, nodeMap: number, items: Array): Node {
-	return new Node('IndexedNode', owner, items, dataMap, nodeMap)
+	return new Node('IndexedNode', owner, items, dataMap, nodeMap, 0)
 }
 
 function CollisionNode(owner, hash, length, items: Array): Node {
-	return new Node('CollisionNode', owner, items, hash, null, length)
+	return new Node('CollisionNode', owner, items, hash, 0, length)
 }
 
 
@@ -224,11 +228,12 @@ var Trie = {
 			bit = 0,
 			shift = 0,
 			hash = this.createHash(key),
-			nodeMap,
-			dataMap
+			nodeMap = 0,
+			dataMap = 0,
+			data = null;
 
 		while (node) {
-			var data = node.data
+			data = node.data
 
 			if (node.type === 'CollisionNode') {
 				return this._lookupCollision(key, data, notFound)
@@ -237,7 +242,7 @@ var Trie = {
 			nodeMap = node.nodeMap
 			dataMap = node.dataMap
 			// IndexedNode
-			bit = 1 << ((hash >>> shift) & 0x01f)
+			bit = 1 << ((hash >>> shift) & 0x01f);
 
 			if ((dataMap & bit)) { // if in this node's data
 
@@ -460,7 +465,7 @@ var Trie = {
 		return node;
 	}
 
-	, remove(shift: number, hash: number, key, node: Node, edit?): Node {
+	, remove(shift: number, hash: number, key, node: Node, edit): Node {
 		if (node.type === 'IndexedNode')
 			return this._indexedRemove(shift, hash, key, node, edit);
 
@@ -487,7 +492,7 @@ var Trie = {
 
 	// = iterate =================================================================================
 
-	, kvreduce(fn, seed: T, node: Node): T {
+	, kvreduce<T>(fn, seed: T, node: Node): T {
 		var data = node.data
 
 		if (node.type === 'IndexedNode') {
@@ -603,13 +608,13 @@ var Reducer = {
 	, foldValueFn(ferry, key, value) {}
 }
 
-export var Api = {
+export var Map = {
 	empty() {
 		return EMPTY;
 	}
 
 	, of(key, value) {
-		return Trie.put(0, createHash(key), key, value, node, null)
+		return Trie.put(0, createHash(key), key, value, EMPTY, null)
 	}
 
 	, initialize(size, fn) {
@@ -624,7 +629,7 @@ export var Api = {
 		return hamt
 	}
 
-	, put(key, value, node = EMPTY, transaction?) {
+	, put(key, value, node = EMPTY, transaction) {
 
 		return Trie.put(0, createHash(key), key, value, node, Transaction.start(transaction))
 	}
@@ -645,30 +650,30 @@ export var Api = {
 
 	//todo: pretty sure reduce should yield values only
 	, reduce(fn, seed, trie) {
-		return Trie.kvreduce(Reducer.reduceValueFn, Reducer.FastFerry(fn, seed), trie).seed
+		return Trie.kvreduce<Reducer.FastFerry>(Reducer.reduceValueFn, Reducer.FastFerry(fn, seed), trie).seed
 	}
 
 	, reduceWithKey: Trie.kvreduce
 
 	, map(fn, trie) {
-		return Trie.kvreduce(Reducer.mapFn, Reducer.FastFerry(fn), trie).hamt
+		return Trie.kvreduce<Reducer.FastFerry>(Reducer.mapFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, mapWithKey(fn, trie) {
-		return Trie.kvreduce(Reducer.mapWithKeyFn, Reducer.FastFerry(fn), trie).hamt
+		return Trie.kvreduce<Reducer.FastFerry>(Reducer.mapWithKeyFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, filter(fn, trie) {
-		return Trie.kvreduce(Reducer.filterFn
+		return Trie.kvreduce<Reducer.FastFerry>(Reducer.filterFn
 			, Reducer.FastFerry(fn)
 			, trie).hamt
 	}
 	, filterWithKey(fn, trie) {
-		return Trie.kvreduce(Reducer.filterWithKeyFn, Reducer.FastFerry(fn), trie).hamt
+		return Trie.kvreduce<Reducer.FastFerry>(Reducer.filterWithKeyFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, merge(target, src) {
-		return Trie.kvreduce((ferry, key, value) => {
+		return Trie.kvreduce<Reducer.FastFerry>((ferry, key, value) => {
 			ferry.hamt = Trie.put(0, createHash(key), key, value, ferry.hamt, ferry.trans)
 			return ferry
 		}, { hamt: target, trans: Transaction() }, src).hamt

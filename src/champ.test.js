@@ -1,4 +1,4 @@
-import {Api} from './champ';
+import {Map} from './champ';
 
 var TEST_KEYS = [
 	'groak',
@@ -43,24 +43,24 @@ const NOT_FOUND = 'Not Found?'
 // })
 
 test('basic construction', () => {
-	const map = Api.empty();
-	Api.put("foo", "bar", map)
+	const map = Map.empty();
+	Map.put("foo", "bar", map)
 });
 
 test('test put', () => {
-	const map = TEST_KEYS.reduce((map, word) => Api.put(word, word, map), Api.empty())
-	// var map = Api.put('foo', 'fooVal', Api.empty())
+	const map = TEST_KEYS.reduce((map, word) => Map.put(word, word, map), Map.empty())
+	// var map = Map.put('foo', 'fooVal', Map.empty())
 
 	expect(map).toBeTruthy()
 });
 
 test('test lookup', () => {
-	const map = TEST_KEYS.reduce((map, word) => Api.put(word, word, map), Api.empty())
+	const map = TEST_KEYS.reduce((map, word) => Map.put(word, word, map), Map.empty())
 
-	expect(Api.lookup('groak', map, NOT_FOUND)).toEqual('groak')
+	expect(Map.lookup('groak', map, NOT_FOUND)).toEqual('groak')
 
 	TEST_KEYS.forEach(key => {
-		expect(Api.lookup(key, map, NOT_FOUND)).toEqual(key)
+		expect(Map.lookup(key, map, NOT_FOUND)).toEqual(key)
 	})
 });
 
@@ -69,9 +69,9 @@ describe('large maps', function() {
 	var map;
 
 	it('test put', function() {
-		var _map = Api.empty()
+		var _map = Map.empty()
 		for (var i = 0, s = SIZE; s > i; i++) {
-			_map = Api.put('_key:' + i, '_value:' + i, _map)
+			_map = Map.put('_key:' + i, '_value:' + i, _map)
 		}
 		map = _map
 	})
@@ -79,26 +79,26 @@ describe('large maps', function() {
 	it('test lookup', function() {
 
 		for (var i = 0, s = SIZE; s > i; i++) {
-			expect(Api.lookup('_key:' + i, map, NOT_FOUND)).toEqual('_value:' + i)
+			expect(Map.lookup('_key:' + i, map, NOT_FOUND)).toEqual('_value:' + i)
 		}
 	})
 })
 
 
 describe('test remove', () => {
-	const map = TEST_KEYS.reduce((map, word) => Api.put(word, word, map), Api.empty())
+	const map = TEST_KEYS.reduce((map, word) => Map.put(word, word, map), Map.empty())
 
 	it('removes a single key', () => {
 
-		const noGroak = Api.remove('groak', map)
-		expect(Api.lookup('groak', noGroak, NOT_FOUND)).toEqual(NOT_FOUND)
+		const noGroak = Map.remove('groak', map)
+		expect(Map.lookup('groak', noGroak, NOT_FOUND)).toEqual(NOT_FOUND)
 	})
 
 
 	it('removes immutably without affecting source', () => {
 
 		TEST_KEYS.forEach(key => {
-			expect(Api.lookup(key, map, NOT_FOUND)).toEqual(key)
+			expect(Map.lookup(key, map, NOT_FOUND)).toEqual(key)
 		})
 	})
 });

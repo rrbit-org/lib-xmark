@@ -16,8 +16,8 @@ var runSuite = require('./runSuite'),
 
 // var SIZE = 8
 // var SIZE = 16
-var SIZE = 32
-// var SIZE = 128
+// var SIZE = 32
+var SIZE = 128
 // var SIZE = 1024
 // var SIZE = 32768
 
@@ -124,12 +124,8 @@ suite.add('native Map', function() {
 		 var value = data.Map.get('key' + i)
 })
 
-// suite.add('faucett', function() {
-// 	try {
-// 		for (var i = 0; SIZE > i; i++)
-// 			 var value = data.faucett.get('key' + i)
-// 	} catch(e) {
-// 		console.log(e)
-// 	}
-// })
+suite.add('faucett', function() {
+	for (var i = 0; SIZE > i; i++)
+		 var value = data.faucett.get('key' + i)
+})
 runSuite(suite)

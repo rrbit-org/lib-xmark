@@ -1,5 +1,5 @@
-import { Api as Entry } from './champ.singleEntry'
-import { Api as Inline } from './champ'
+import { Map as Entry } from './champ.singleEntry'
+import { Map as Inline } from './champ'
 
 export {
 	Entry,

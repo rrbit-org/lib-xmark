@@ -14,7 +14,7 @@ var runSuite = require('./runSuite'),
 
 var suite = new Benchmark.Suite('compare add 2 pair');
 
-var SIZE = 32
+var SIZE = 64
 // var SIZE = 1024
 // var SIZE = 32768
 
@@ -60,6 +60,13 @@ suite.add('champ:entry', function() {
 	var map = Entry.empty()
 	for (var i = 0; SIZE > i; i++)
 		map = Entry.put('key' + i, 'val' + i, map)
+})
+
+suite.add('native js object', function() {
+	var map = {}
+	for (var i = 0; SIZE > i; i++)
+		map['key' + i] = 'val' + i
+	return map
 })
 
 runSuite(suite)

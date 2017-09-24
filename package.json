@@ -8,7 +8,7 @@
   "license": "MIT",
   "devDependencies": {
     "@collectable/map": "^3.1.0",
-    "@nathanfaucett/immutable-hash_map": "^0.0.3",
+    "@nathanfaucett/immutable-hash_map": "^0.0.4",
     "babel-plugin-transform-object-rest-spread": "^6.26.0",
     "babel-preset-env": "^1.6.0",
     "babel-preset-flow": "^6.23.0",

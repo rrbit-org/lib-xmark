@@ -79,3 +79,44 @@ export default class StringLruCache {
 }
 
 StringLruCache.prototype.Entry = Entry
+
+export class StringCache {
+	constructor(max = 255) {
+		this.size = 0
+		this.max = max
+		this.prev = Object.create(null)
+		this.cache = Object.create(null)
+	}
+
+	_update(key, value) {
+		this.cache[key] = value
+		this.size ++
+		if(this.size >= this.max) {
+			this.size = 0
+			this.prev = this.cache
+			this.cache = Object.create(null)
+		}
+		return value;
+	}
+
+	has(key) {
+		return this.cache[key] !== undefined || this.prev !== undefined
+	}
+
+	remove (key) {
+		if(this.cache[key] !== undefined)
+			this.cache[key] = undefined
+		if(this.prev[key] !== undefined)
+			this.prev[key] = undefined
+	}
+
+	getOrCreate(key, factory) {
+		var value = this.cache[key]
+		if (value !== undefined)
+			return value;
+		if ((value = this.prev[key]) !== undefined)
+			return this._update(key, value)
+
+		return this._update(key, factory(key))
+	}
+}

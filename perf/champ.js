@@ -81,9 +81,52 @@ class StringLruCache {
 
 StringLruCache.prototype.Entry = Entry;
 
+class StringCache {
+	constructor(max = 255) {
+		this.size = 0;
+		this.max = max;
+		this.prev = Object.create(null);
+		this.cache = Object.create(null);
+	}
+
+	_update(key, value) {
+		this.cache[key] = value;
+		this.size ++;
+		if(this.size >= this.max) {
+			this.size = 0;
+			this.prev = this.cache;
+			this.cache = Object.create(null);
+		}
+		return value;
+	}
+
+	has(key) {
+		return this.cache[key] !== undefined || this.prev !== undefined
+	}
+
+	remove (key) {
+		if(this.cache[key] !== undefined)
+			this.cache[key] = undefined;
+		if(this.prev[key] !== undefined)
+			this.prev[key] = undefined;
+	}
+
+	getOrCreate(key, factory) {
+		var value = this.cache[key];
+		if (value !== undefined)
+			return value;
+		if ((value = this.prev[key]) !== undefined)
+			return this._update(key, value)
+
+		return this._update(key, factory(key))
+	}
+}
+
+'use strict';
+
 // = string ================================================================================================
 
-var CACHE = new StringLruCache();
+var CACHE = new StringCache();
 
 function hashString(string) {
 	var hash = 0;
@@ -217,7 +260,7 @@ function hash(o) {
 
 //      
 // import {NodeIterator} from './NodeIterator'
-
+'use strict';
 // = flow types ==============================================================================
 
                                                          
@@ -508,7 +551,7 @@ const NodeTrait = {
 	// = update/append =================================================================================
 
 	, _findMatchingKey(key     , collisionNode          ) {
-		var { data } = collisionNode;
+		var data = collisionNode.data;
 		for (var i = 0, len = data.length; len > i; i++) {
 			if (this.equals(key, data[i].key)) {
 				return i;
@@ -753,7 +796,7 @@ Object.assign(NodeTrait, Arrays);
 
 const EMPTY = IndexedNode(null, 0, 0, []);
 
-const Api = {
+const Map = {
 	empty()                  {
 		return EMPTY;
 	}
@@ -805,6 +848,8 @@ const Api = {
 	// merge
 };
 
+//      
+'use strict';
 // = helpers ==============================================================================
 
 
@@ -988,10 +1033,8 @@ function MapEntry$1(key, value) {
  * @param length
  * @constructor
  */
-function Node$1     (type, owner , data            , hash$$1        , altHash         , length         ) {
-	this.edit = owner;
-	this.data = data;
-	this.type = type;
+function Node$1     (type, owner             , data            , hash$$1        , altHash        , length        ) {
+
 
 	if (type === 'IndexedNode') {
 		this.dataMap = hash$$1;
@@ -1000,14 +1043,18 @@ function Node$1     (type, owner , data            , hash$$1        , altHash   
 		this.hash = hash$$1;
 		this.length = length;
 	}
+
+	this.data = data;
+	this.type = type;
+	this.edit = owner;
 }
 
 function IndexedNode$1(owner, dataMap        , nodeMap        , items       )       {
-	return new Node$1('IndexedNode', owner, items, dataMap, nodeMap)
+	return new Node$1('IndexedNode', owner, items, dataMap, nodeMap, 0)
 }
 
 function CollisionNode$1(owner, hash$$1, length, items       )       {
-	return new Node$1('CollisionNode', owner, items, hash$$1, null, length)
+	return new Node$1('CollisionNode', owner, items, hash$$1, 0, length)
 }
 
 
@@ -1029,11 +1076,12 @@ var Trie = {
 			bit = 0,
 			shift = 0,
 			hash$$1 = this.createHash(key),
-			nodeMap,
-			dataMap;
+			nodeMap = 0,
+			dataMap = 0,
+			data = null;
 
 		while (node) {
-			var data = node.data;
+			data = node.data;
 
 			if (node.type === 'CollisionNode') {
 				return this._lookupCollision(key, data, notFound)
@@ -1265,7 +1313,7 @@ var Trie = {
 		return node;
 	}
 
-	, remove(shift        , hash$$1        , key, node      , edit )       {
+	, remove(shift        , hash$$1        , key, node      , edit)       {
 		if (node.type === 'IndexedNode')
 			return this._indexedRemove(shift, hash$$1, key, node, edit);
 
@@ -1292,7 +1340,7 @@ var Trie = {
 
 	// = iterate =================================================================================
 
-	, kvreduce(fn, seed   , node      )    {
+	, kvreduce   (fn, seed   , node      )    {
 		var data = node.data;
 
 		if (node.type === 'IndexedNode') {
@@ -1402,13 +1450,13 @@ var Reducer = {
 	, foldValueFn(ferry, key, value) {}
 };
 
-var Api$1 = {
+var Map$1 = {
 	empty() {
 		return EMPTY$1;
 	}
 
 	, of(key, value) {
-		return Trie.put(0, hash(key), key, value, node, null)
+		return Trie.put(0, hash(key), key, value, EMPTY$1, null)
 	}
 
 	, initialize(size, fn) {
@@ -1423,7 +1471,7 @@ var Api$1 = {
 		return hamt
 	}
 
-	, put(key, value, node = EMPTY$1, transaction ) {
+	, put(key, value, node = EMPTY$1, transaction) {
 
 		return Trie.put(0, hash(key), key, value, node, Transaction.start(transaction))
 	}
@@ -1444,30 +1492,30 @@ var Api$1 = {
 
 	//todo: pretty sure reduce should yield values only
 	, reduce(fn, seed, trie) {
-		return Trie.kvreduce(Reducer.reduceValueFn, Reducer.FastFerry(fn, seed), trie).seed
+		return Trie.kvreduce<Reducer.FastFerry>(Reducer.reduceValueFn, Reducer.FastFerry(fn, seed), trie).seed
 	}
 
 	, reduceWithKey: Trie.kvreduce
 
 	, map(fn, trie) {
-		return Trie.kvreduce(Reducer.mapFn, Reducer.FastFerry(fn), trie).hamt
+		return Trie.kvreduce<Reducer.FastFerry>(Reducer.mapFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, mapWithKey(fn, trie) {
-		return Trie.kvreduce(Reducer.mapWithKeyFn, Reducer.FastFerry(fn), trie).hamt
+		return Trie.kvreduce<Reducer.FastFerry>(Reducer.mapWithKeyFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, filter(fn, trie) {
-		return Trie.kvreduce(Reducer.filterFn
+		return Trie.kvreduce<Reducer.FastFerry>(Reducer.filterFn
 			, Reducer.FastFerry(fn)
 			, trie).hamt
 	}
 	, filterWithKey(fn, trie) {
-		return Trie.kvreduce(Reducer.filterWithKeyFn, Reducer.FastFerry(fn), trie).hamt
+		return Trie.kvreduce<Reducer.FastFerry>(Reducer.filterWithKeyFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, merge(target, src) {
-		return Trie.kvreduce((ferry, key, value) => {
+		return Trie.kvreduce<Reducer.FastFerry>((ferry, key, value) => {
 			ferry.hamt = Trie.put(0, hash(key), key, value, ferry.hamt, ferry.trans);
 			return ferry
 		}, { hamt: target, trans: Transaction() }, src).hamt
@@ -1475,5 +1523,5 @@ var Api$1 = {
 
 };
 
-exports.Entry = Api;
-exports.Inline = Api$1;
+exports.Entry = Map;
+exports.Inline = Map$1;

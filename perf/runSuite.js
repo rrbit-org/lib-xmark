@@ -36,5 +36,8 @@ module.exports = function runSuite(suite) {
 		.on('complete', function() {
 			console.log('-------------------------------------------------------');
 		})
+		.on('error', function(e) {
+			console.log(e)
+		})
 		.run();
 };

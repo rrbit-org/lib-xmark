@@ -1,5 +1,5 @@
-import StringCache from './StringCache'
-
+import {StringCache} from './StringCache'
+'use strict';
 
 // = string ================================================================================================
 

@@ -1,7 +1,7 @@
 // @flow
 import { hash as createHash } from './hash'
 // import {NodeIterator} from './NodeIterator'
-
+'use strict';
 // = flow types ==============================================================================
 
 type TransactionInstance = { isLengthDifferent: boolean }
@@ -292,7 +292,7 @@ const NodeTrait = {
 	// = update/append =================================================================================
 
 	, _findMatchingKey(key: any, collisionNode: NodeType) {
-		var { data } = collisionNode
+		var data = collisionNode.data
 		for (var i = 0, len = data.length; len > i; i++) {
 			if (this.equals(key, data[i].key)) {
 				return i;
@@ -543,7 +543,7 @@ const EMPTY_ITERATOR = {
 
 const EMPTY = IndexedNode(null, 0, 0, [])
 
-export const Api = {
+export const Map = {
 	empty(): IndexedNodeType {
 		return EMPTY;
 	}
