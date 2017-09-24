@@ -7,7 +7,8 @@ var runSuite = require('./runSuite'),
 	CollectableMap = require('@collectable/map'),
 	champ = require('./champ'),
 	Inline = champ.Inline,
-	Entry = champ.Entry
+	Entry = champ.Entry,
+	supaHamt = champ.Hamt
 
 ;
 
@@ -43,6 +44,12 @@ var data = {
 	}()),
 	hamt: (function() {
 		var map = hamt.empty
+		for (var i = 0; SIZE > i; i++)
+			map = map.set('key' + i, 'val' + i)
+		return map
+	}()),
+	shamt: (function() {
+		var map = supaHamt.empty
 		for (var i = 0; SIZE > i; i++)
 			map = map.set('key' + i, 'val' + i)
 		return map
@@ -112,6 +119,12 @@ suite.add('champ:entry', function() {
 	var map = data.champ_en
 	for (var i = 0; SIZE > i; i++)
 		 var value = Entry.lookup('key' + i, map)
+})
+
+suite.add('champ:hamt', function() {
+	var map = data.hamt
+	for (var i = 0; SIZE > i; i++)
+		 var value = map.get('key' + i)
 })
 
 suite.add('js object', function() {
