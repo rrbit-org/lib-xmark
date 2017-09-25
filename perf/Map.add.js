@@ -8,7 +8,8 @@ var runSuite = require('./runSuite'),
 	champ = require('./champ'),
 	Inline = champ.Inline,
 	Entry = champ.Entry,
-	Hamt = champ.Hamt
+	Hamt = champ.Hamt,
+	Oop = champ.Oop
 
 ;
 
@@ -63,10 +64,17 @@ suite.add('champ:entry', function() {
 		map = Entry.put('key' + i, 'val' + i, map)
 })
 
-suite.add('champ:hamt', function() {
-	var map = Hamt.empty
+suite.add('champ:oop', function() {
+	var map = Oop.empty()
 	for (var i = 0; SIZE > i; i++)
-		map = map.set('key' + i, 'val' + i)
+		map = map.put('key' + i, 'val' + i)
+})
+
+suite.add('champ:oop-transient', function() {
+	var map = Oop.empty()
+	var tr = map.start()
+	for (var i = 0; SIZE > i; i++)
+		map = map.put('key' + i, 'val' + i, tr)
 })
 
 suite.add('native js object', function() {
