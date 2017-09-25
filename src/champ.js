@@ -108,7 +108,10 @@ var Bitwise = {
 	}
 
 	, hashFragment(bitmap, bit) {
-		return this.popcount(bitmap & (bit - 1));
+		var v = bitmap & (bit - 1)
+		v = v - ((v >> 1) & 0x55555555);
+		v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
+		return ((v + (v >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
 	}
 
 	, toBitmap(x) {
@@ -237,33 +240,42 @@ var Trie = {
 		while (node) {
 			data = node.data
 
-			if (node.type === COLLISION_NODE) {
-				return this._lookupCollision(key, data, notFound)
+			if (node.type === 1) { // collision node
+				for (i = 0, len = data.length; len > i; i += 2) {
+					if (key === data[i])
+						return data[i + 1];
+				}
+				return notFound
 			}
 
-			nodeMap = node.nodeMap
+
 			dataMap = node.dataMap
 			// IndexedNode
 			bit = 1 << ((hash >>> shift) & 0x01f);
 
 			if ((dataMap & bit)) { // if in this node's data
 
-				i = 2 * this.hashFragment(dataMap, bit);
+				i = dataMap & (bit - 1)
+				i = i - ((i >> 1) & 0x55555555);
+				i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
+				i = ((i + (i >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
+
+				i = 2 * i
 				return key === data[i] ? data[i + 1] : notFound;
 			}
 
+			nodeMap = node.nodeMap
 			if (!(nodeMap & bit)) {
 				return notFound
 			}
-			node = data[data.length - 1 - this.hashFragment(nodeMap, bit)]
+
+			i = nodeMap & (bit - 1)
+			i = i - ((i >> 1) & 0x55555555);
+			i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
+			i = ((i + (i >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
+
+			node = data[data.length - 1 - i]
 			shift += 5
-		}
-		return notFound
-	}
-	, _lookupCollision(key, entries, notFound) {
-		for (var i = 0, len = entries.length; len > i; i += 2) {
-			if (key === entries[i])
-				return entries[i + 1];
 		}
 		return notFound
 	}
@@ -359,7 +371,7 @@ var Trie = {
 		} else if ((nodeMap & bit) !== 0) { // is in existing child node
 			var index = data.length - 1 - this.hashFragment(nodeMap, bit);
 			var child = data[index];
-			var newChild = this.put(shift + 5, hash, key, value, child, edit);
+			var newChild = this.putWithHash(shift + 5, hash, key, value, child, edit);
 
 			return child === newChild ? node : this._updateValue(index, newChild, node, edit);
 		}
@@ -399,11 +411,14 @@ var Trie = {
 		return CollisionNode(edit, node.hash, node.length + 1, newArray);
 	}
 
-	, put(shift, hash, key, value, node, edit) {
+	, putWithHash(shift, hash, key, value, node, edit) {
 		if (node.type === COLLISION_NODE)
 			return this._collisionPut(shift, hash, key, value, node, edit)
 
 		return this._indexedPut(shift, hash, key, value, node, edit)
+	}
+	, put(key, value, node, transaction) {
+		return this.putWithHash(0, this.createHash(key), key, value, node, Transaction.start(transaction))
 	}
 
 	// = remove =================================================================================
@@ -485,7 +500,7 @@ var Trie = {
 			case 2:
 				var data = node.data;
 				var idx = (this.equals(key, data[0])) ? 2 : 0;
-				return this.put(0, hash, data[idx], data[(idx + 1)], EMPTY, edit);
+				return this.putWithHash(0, hash, data[idx], data[(idx + 1)], EMPTY, edit);
 			default:
 				return CollisionNode(edit, hash, (node.length - 1), this.aRemovePair(node.data, (index / 2)));
 		}
@@ -494,7 +509,7 @@ var Trie = {
 
 	// = iterate =================================================================================
 
-	, kvreduce<T>(fn, seed: T, node: Node): T {
+	, kvreduce(fn, seed, node) {
 		var data = node.data
 
 		if (node.type === INDEXED_NODE) {
@@ -570,7 +585,7 @@ var Reducer = {
 	// store common values on the reducer's seed/accumulator to avoid closures(faster)
 	FastFerry: function FastFerry(fn, seed) {
 		if (!(this instanceof FastFerry))
-			return new FastFerry(fn);
+			return new FastFerry(fn, seed);
 
 		this.hamt = EMPTY
 		this.trans = Transaction.start()
@@ -580,25 +595,25 @@ var Reducer = {
 
 	, mapFn(ferry, key, value) {
 
-		ferry.map = Trie.put(0, createHash(key), key, ferry.fn(value), ferry.hamt, ferry.trans)
+		ferry.hamt = Trie.put(key, ferry.fn(value), ferry.hamt, ferry.trans)
 		return ferry
 	}
 	, mapWithKeyFn(ferry, key, value) {
 
-		ferry.map = Trie.put(0, createHash(key), key, ferry.fn(key, value), ferry.hamt, ferry.trans)
+		ferry.hamt = Trie.put(key, ferry.fn(key, value), ferry.hamt, ferry.trans)
 		return ferry
 	}
 
 	, filterFn(ferry, key, value) {
 		if (ferry.fn(value))
-			ferry.map = Trie.put(0, createHash(key), key, value, ferry.hamt, ferry.trans)
+			ferry.hamt = Trie.put(key, value, ferry.hamt, ferry.trans)
 
 		return ferry
 	}
 
 	, filterWithKeyFn(ferry, key, value) {
 		if (ferry.fn(key, value))
-			ferry.map = Trie.put(0, createHash(key), key, value, ferry.hamt, ferry.trans)
+			ferry.hamt = Trie.put(key, value, ferry.hamt, ferry.trans)
 
 		return ferry
 	}
@@ -616,7 +631,7 @@ export var Map = {
 	}
 
 	, of(key, value) {
-		return Trie.put(0, createHash(key), key, value, EMPTY, null)
+		return Trie.put(key, value, EMPTY, null)
 	}
 
 	, initialize(size, fn) {
@@ -625,16 +640,12 @@ export var Map = {
 
 		for (var i = 0; size > i; i++) {
 			var { key, value } = fn(i)
-			Trie.put(0, createHash(key), key, value, hamt, trans)
+			hamt = Trie.put(key, value, hamt, trans)
 		}
 
 		return hamt
 	}
-
-	, put(key, value, node = EMPTY, transaction) {
-
-		return Trie.put(0, createHash(key), key, value, node, Transaction.start(transaction))
-	}
+	, put: Trie.put.bind(Trie)
 
 	, remove(key, node, transaction) {
 
@@ -652,33 +663,46 @@ export var Map = {
 
 	//todo: pretty sure reduce should yield values only
 	, reduce(fn, seed, trie) {
-		return Trie.kvreduce<Reducer.FastFerry>(Reducer.reduceValueFn, Reducer.FastFerry(fn, seed), trie).seed
+		return Trie.kvreduce(Reducer.reduceValueFn, Reducer.FastFerry(fn, seed), trie).seed
 	}
 
 	, reduceWithKey: Trie.kvreduce
 
 	, map(fn, trie) {
-		return Trie.kvreduce<Reducer.FastFerry>(Reducer.mapFn, Reducer.FastFerry(fn), trie).hamt
+		return Trie.kvreduce(Reducer.mapFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, mapWithKey(fn, trie) {
-		return Trie.kvreduce<Reducer.FastFerry>(Reducer.mapWithKeyFn, Reducer.FastFerry(fn), trie).hamt
+		return Trie.kvreduce(Reducer.mapWithKeyFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, filter(fn, trie) {
-		return Trie.kvreduce<Reducer.FastFerry>(Reducer.filterFn
+		return Trie.kvreduce(Reducer.filterFn
 			, Reducer.FastFerry(fn)
 			, trie).hamt
 	}
 	, filterWithKey(fn, trie) {
-		return Trie.kvreduce<Reducer.FastFerry>(Reducer.filterWithKeyFn, Reducer.FastFerry(fn), trie).hamt
+		return Trie.kvreduce(Reducer.filterWithKeyFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, merge(target, src) {
-		return Trie.kvreduce<Reducer.FastFerry>((ferry, key, value) => {
-			ferry.hamt = Trie.put(0, createHash(key), key, value, ferry.hamt, ferry.trans)
+		return Trie.kvreduce((ferry, key, value) => {
+			ferry.hamt = Trie.put(key, value, ferry.hamt, ferry.trans)
 			return ferry
 		}, { hamt: target, trans: Transaction() }, src).hamt
 	}
 
 };
+
+Object.assign(Node.prototype, {
+	lookup: Trie.lookup.bind(Trie)
+
+	, get: function(key, notFound) {
+		return this.lookup(key, this, notFound)
+	}
+
+	, _put: Trie.put.bind(Trie)
+	, put: function(key, value) {
+		return this._put(key, value, this)
+	}
+})

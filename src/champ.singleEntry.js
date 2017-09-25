@@ -182,6 +182,10 @@ function Node(type, owner?, data: Array<MapEntry>, hash: number, altHash?: numbe
 	}
 }
 
+Node.prototype.get = function(key, notFound) {
+	return NodeTrait.lookup(key, this, notFound)
+}
+
 function IndexedNode(owner, dataMap: number, nodeMap: number, items: Array<MapEntry>): IndexedNodeType {
 	return new Node(INDEXED_NODE, owner, items, dataMap, nodeMap)
 }
@@ -209,18 +213,23 @@ const NodeTrait = {
 
 	, lookup(key, node, notFound) {
 		var bit = 0,
+			i = 0,
 			shift = 0,
 			nodeMap = 0,
 			dataMap = 0,
-			hash = createHash(key),
+			hash = this.createHash(key),
 			data,
 			entry;
 
 		while (node) {
 			data = node.data
 
-			if (node.type === COLLISION_NODE) {
-				return this._lookupCollision(key, data, notFound)
+			if (node.type === 1) { //COLLISION_NODE
+				for (i = 0, len = data.length; len > i; i += 2) {
+					if (key === data[i])
+						return data[i + 1];
+				}
+				return notFound
 			}
 
 			nodeMap = node.nodeMap
@@ -230,14 +239,24 @@ const NodeTrait = {
 
 			if ((dataMap & bit)) { // if in this node's data
 
-				entry = data[this.hashFragment(dataMap, bit)];
+				i = dataMap & (bit - 1)
+				i = i - ((i >> 1) & 0x55555555);
+				i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
+				i = ((i + (i >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
+				entry = data[i];
 				return key === entry.key ? entry.value : notFound;
 			}
 
 			if (!(nodeMap & bit)) {
 				return notFound
 			}
-			node = data[data.length - 1 - this.hashFragment(nodeMap, bit)]
+
+			i = nodeMap & (bit - 1)
+			i = i - ((i >> 1) & 0x55555555);
+			i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
+			i = ((i + (i >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
+
+			node = data[data.length - 1 - i]
 			shift += 5
 		}
 		return notFound

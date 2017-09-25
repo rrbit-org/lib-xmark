@@ -111,10 +111,14 @@ export function hash(o) {
 		var len = o.length, hash = 0;
 		if (len > 16) return CACHE.getOrCreate(o, hashString);
 
-		for (var i = 0; len > i; i++) {
-			hash = 31 * hash + o.charCodeAt(i) | 0;
+		// for (var i = 0; len > i; i++) {
+		// 	hash = 31 * hash + o.charCodeAt(i) | 0;
+		// }
+		// return hash >>> 1 & 0x40000000 | hash & 0xbfffffff
+		for (var i = 0; i < len; ++i) {
+			hash = (hash << 5) - hash + o.charCodeAt(i) | 0;
 		}
-		return hash >>> 1 & 0x40000000 | hash & 0xbfffffff
+		return hash;
 
 	}
 	if (type === 'number') {

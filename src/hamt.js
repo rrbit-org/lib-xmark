@@ -74,7 +74,10 @@ function toBitmap(x) {
 }
 
 function fromBitmap(bitmap, bit) {
-	return popcount(bitmap & bit - 1);
+	var v = bitmap & (bit - 1)
+	v = v - ((v >> 1) & 0x55555555);
+	v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
+	return ((v + (v >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
 }
 
 var Bitwise = {
@@ -476,11 +479,11 @@ function tryGetHash(alt, hash, key, map) {
 	var shift = 0;
 	while (true) {
 		switch (node.type) {
-			case LEAF:
+			case 1: //leaf
 			{
 				return key === node.key ? node.value : alt;
 			}
-			case COLLISION:
+			case 2: //collision
 			{
 				if (hash === node.hash) {
 					var children = node.children;
@@ -491,20 +494,26 @@ function tryGetHash(alt, hash, key, map) {
 				}
 				return alt;
 			}
-			case INDEX:
+			case 3: //indexed
 			{
-				var frag = hashFragment(shift, hash);
-				var bit = toBitmap(frag);
+
+				var bit = 1 << (hash >>> shift & 31);
 				if (node.mask & bit) {
-					node = node.children[fromBitmap(node.mask, bit)];
+
+					var v = node.mask & (bit - 1)
+					v = v - ((v >> 1) & 0x55555555);
+					v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
+					v = ((v + (v >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
+
+					node = node.children[v];
 					shift += SIZE;
 					break;
 				}
 				return alt;
 			}
-			case ARRAY:
+			case 4: //array
 			{
-				node = node.children[hashFragment(shift, hash)];
+				node = node.children[(hash >>> shift & 31)];
 				if (node) {
 					shift += SIZE;
 					break;
@@ -883,13 +892,13 @@ Object.assign(Map.prototype, {
 		return hasHash(hash, key, this);
 	}
 	, get: function (key, alt) {
-		return tryGet(alt, key, this);
+		return tryGetHash(alt, hash(key), key, this);
 	}
 	, getHash: function (hash, key) {
 		return getHash(hash, key, this);
 	}
 	, tryGet: function (alt, key) {
-		return tryGet(alt, key, this);
+		return tryGetHash(alt, hash(key), key, this);
 	}
 	, tryGetHash: function(alt, hash, key) {
 		return tryGetHash(alt, hash, key, this);
