@@ -8,6 +8,7 @@ var runSuite = require('./runSuite'),
 	champ = require('./champ'),
 	Inline = champ.Inline,
 	Entry = champ.Entry,
+	Oop = champ.Oop,
 	supaHamt = champ.Hamt
 
 ;
@@ -72,6 +73,12 @@ var data = {
 			map = Entry.put('key' + i, 'val' + i, map)
 		return map
 	}()),
+	champ_oop: (function() {
+		var map = Oop.empty()
+		for (var i = 0; SIZE > i; i++)
+			map = map.put('key' + i, 'val' + i)
+		return map
+	}()),
 	native:(function() {
 		var map = {}
 		for (var i = 0; SIZE > i; i++)
@@ -118,11 +125,11 @@ suite.add('champ:inline', function() {
 suite.add('champ:entry', function() {
 	var map = data.champ_en
 	for (var i = 0; SIZE > i; i++)
-		 var value = Entry.lookup('key' + i, map)
+		 var value = map.get('key' + i)
 })
 
-suite.add('champ:hamt', function() {
-	var map = data.hamt
+suite.add('champ:oop', function() {
+	var map = data.champ_oop
 	for (var i = 0; SIZE > i; i++)
 		 var value = map.get('key' + i)
 })

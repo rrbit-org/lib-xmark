@@ -178,53 +178,36 @@ function MapEntry(key, value) {
 var INDEXED_NODE = 0;
 var COLLISION_NODE = 1;
 
-/**
- *
- * @param type - node type (INDEXED_NODE|COLLISION_NODE)
- * @param owner - any object which can represent the current
- * transaction. used to detect if mutation optimizations are
- * allowed
- * @param data - an array keys, values and subnodes
- * @param hash - used to calculate index of current concrete values
- * @param altHash - used to calculate index of subnodes
- * @param length
- * @constructor
- */
-function Node<K,V>(type, owner: Transaction, data: Array<K|V>, hash: number, altHash: number, length: number) {
-
-
-	if (type === INDEXED_NODE) {
-		this.dataMap = hash;
-		this.nodeMap = altHash;
-	} else { // CollisionNode
-		this.hash = hash
-		this.length = length
-	}
-
-	this.data = data;
-	this.type = type;
-	this.edit = owner;
+function IronMap(trie, length) {
+	this.trie = trie;
+	this.length = length;
 }
 
-function _CollisionNode(owner, hash, length, items) {
-	this.data = items
-	this.hash = hash
-	this.edit = owner
-	this.length = length
 
-}
+function IndexedNode(owner, dataMap: number, nodeMap: number, items: Array) {
+	// return new _IndexedNode(owner, dataMap, nodeMap, items)
 
-function _IndexedNode(owner, dataMap, nodeMap, items) {
 	this.data = items
 	this.dataMap = dataMap
 	this.nodeMap = nodeMap
 	this.edit = owner
 }
 
-Object.assign(_IndexedNode.prototype, Arrays, Bitwise, Transaction, {
+function CollisionNode(owner, hash, length, items: Array) {
+	// return new Node(COLLISION_NODE, owner, items, hash, 0, length)
+	// return new _CollisionNode(owner, hash, length, items)
+
+	this.data = items
+	this.hash = hash
+	this.edit = owner
+	this.length = length
+}
+
+Object.assign(IndexedNode.prototype, Arrays, Bitwise, Transaction, {
 	createHash,
 
-	isSingle(node: Node) {
+	// = update/append =================================================================================
+	isSingle(node) {
 		if (node.type === COLLISION_NODE)
 			return node.length === 1;
 		return (this.popcount(node.dataMap) === 2) && (node.nodeMap === 0)
@@ -235,7 +218,7 @@ Object.assign(_IndexedNode.prototype, Arrays, Bitwise, Transaction, {
 			iNode.data[idx] = value;
 			return iNode;
 		}
-		return IndexedNode(edit, iNode.dataMap, iNode.nodeMap, this.aUpdate(idx, value, iNode.data));
+		return new IndexedNode(edit, iNode.dataMap, iNode.nodeMap, this.aUpdate(idx, value, iNode.data));
 	},
 
 	_copyAndMigrateToNode(bit, child, node, edit) {
@@ -251,18 +234,18 @@ Object.assign(_IndexedNode.prototype, Arrays, Bitwise, Transaction, {
 		// drop second key + value
 		this.aCopy(data, (2 + newIndex), squashed, (newIndex + 1), (data.length - 2 - newIndex));
 
-		return IndexedNode(edit, (dataMap ^ bit), (nodeMap | bit), squashed);
+		return new IndexedNode(edit, (dataMap ^ bit), (nodeMap | bit), squashed);
 	},
 
 	_mergeTwoKeyValuePairs(shift, oldHash, oldKey, oldValue, hash, key, value, edit) {
 		if ((32 < shift) && (oldHash === hash)) {
-			return CollisionNode(edit, oldHash, 2, [oldKey, oldValue, key, value]);
+			return new CollisionNode(edit, oldHash, 2, [oldKey, oldValue, key, value]);
 		}
 		var oldMask = this.mask(oldHash, shift)
 			, mask = this.mask(hash, shift);
 
 		if (oldMask === mask) {
-			return IndexedNode(edit
+			return new IndexedNode(edit
 				, 0
 				, this.bitpos(oldHash, shift)
 				, [ this._mergeTwoKeyValuePairs((shift + 5)
@@ -276,7 +259,7 @@ Object.assign(_IndexedNode.prototype, Arrays, Bitwise, Transaction, {
 		}
 
 		var arr = oldMask < mask ? [oldKey, oldValue, key, value] : [key, value, oldKey, oldValue];
-		return IndexedNode(edit, (this.bitpos(oldHash, shift) | this.bitpos(hash, shift)), 0, arr);
+		return new IndexedNode(edit, (this.bitpos(oldHash, shift) | this.bitpos(hash, shift)), 0, arr);
 	},
 
 	putWithHash(shift, hash, key, value, node, edit) { // IndexedNode specific
@@ -315,7 +298,7 @@ Object.assign(_IndexedNode.prototype, Arrays, Bitwise, Transaction, {
 		}
 
 		// does not exist, insert as new key/value
-		return IndexedNode(this.setLengthChanged(edit)
+		return new IndexedNode(this.setLengthChanged(edit)
 			, (dataMap | bit)
 			, nodeMap
 			, this.aInsertPair((2 * this.hashFragment(dataMap, bit)), key, value, data));
@@ -324,15 +307,81 @@ Object.assign(_IndexedNode.prototype, Arrays, Bitwise, Transaction, {
 	put(key, value, transaction) {
 		return this.putWithHash(0, this.createHash(key), key, value, this, this.start(transaction))
 	},
+
+	// = remove =================================================================================
+
+	removeWithHash(shift, hash, key, node, edit) {
+		var index;
+		var bit = this.bitpos(hash, shift);
+		var { dataMap, nodeMap, data } = node
+
+		if ((dataMap & bit) !== 0) {
+			index = this.hashFragment(dataMap, bit);
+
+			// hash may be the same, but since we use a higher perf hashing... that doesn't mean it's really the same key
+			if (key === data[2 * index]) {
+				this.setLengthChanged(edit);
+
+				if (this.popcount(dataMap) === 2 && (nodeMap === 0)) {
+
+					return new IndexedNode(edit,
+						(shift === 0 ? dataMap ^ bit : this.bitpos(hash, 0)),
+						0, //nodeMap hash
+						(index === 0 ? data.slice(2, 4) : data.slice(0, 2)));
+				}
+
+				return new IndexedNode(edit
+					, dataMap ^ bit
+					, nodeMap
+					, this.dualRemove(2 * index, data));
+			}
+			//no matching key
+			return node;
+		}
+
+		if ((nodeMap & bit) !== 0) {
+			index = data.length - 1 - this.hashFragment(nodeMap, bit);
+			var child = data[index];
+			var newChild = this.remove(shift + 5, hash, key, child, edit);
+
+			if (child !== newChild) {
+				if (this.isSingle(newChild)) {
+					if (dataMap === 0 && this.popcount(nodeMap) === 1) {
+						return newChild;
+					}
+
+					// if only one subnode, hoist values up one level
+					var newIndex = 2 * this.hashFragment(dataMap, bit);
+
+					return new IndexedNode(edit
+						, dataMap | bit
+						, nodeMap ^ bit
+						, data
+							.slice(0, newIndex)
+							.concat(newChild.data.slice(0,2))
+							.concat(data.slice(newIndex, index))
+							.concat(data.slice(index + 1)));
+				}
+				return this._updateValue(index, newChild, node, edit);
+			}
+		}
+
+		return node;
+	},
+
+	remove(key, trans) {
+		this.removeWithHash(0, createHash(key), key, node, this.start(trans));
+	},
 })
 
 
 
 
-Object.assign(_CollisionNode.prototype, Arrays, Bitwise, Transaction, {
+Object.assign(CollisionNode.prototype, Arrays, Bitwise, Transaction, {
 	equals,
 	createHash,
 
+	// = update/append =================================================================================
 	_findMatchingKey(key, collisionNode) {
 		var { length, data } = collisionNode
 		for (var i = 0; i < length; i += 2) {
@@ -344,7 +393,8 @@ Object.assign(_CollisionNode.prototype, Arrays, Bitwise, Transaction, {
 	},
 
 	putWithHash(shift, hash, key, value, node, edit) {
-		throw new Error('oops, not implemented yet')
+		//throw new Error('oops, not implemented yet')
+		return this.put(key, value, edit)
 	},
 
 	put(key, value, edit) {
@@ -370,17 +420,18 @@ Object.assign(_CollisionNode.prototype, Arrays, Bitwise, Transaction, {
 			if (node.data[index + 1] === value) { // value is same, do nothing
 				return node;
 			}
-			return CollisionNode(edit, node.hash, (node.length + 1), this.aUpdate(index + 1, value, node.data));
+			return new CollisionNode(edit, node.hash, (node.length + 1), this.aUpdate(index + 1, value, node.data));
 		}
 		newArray = this.dualInsert(node.data.length, key, value, node.data);
 		this.setLengthChanged(edit);
-		return CollisionNode(edit, node.hash, node.length + 1, newArray);
+		return new CollisionNode(edit, node.hash, node.length + 1, newArray);
 	},
 
 
 
 
-	removeWithHash(shift: number, hash: number, key, node: Node, edit): Node {
+	// = remove =================================================================================
+	removeWithHash(shift: number, hash: number, key, node, edit) {
 
 		var index = this._findMatchingKey(key, node);
 		if (index === -1)
@@ -396,32 +447,21 @@ Object.assign(_CollisionNode.prototype, Arrays, Bitwise, Transaction, {
 				var idx = (this.equals(key, data[0])) ? 2 : 0;
 				return EMPTY.putWithHash(0, hash, data[idx], data[(idx + 1)], EMPTY, edit);
 			default:
-				return CollisionNode(edit, hash, (node.length - 1), this.aRemovePair(node.data, (index / 2)));
+				return new CollisionNode(edit, hash, (node.length - 1), this.aRemovePair(node.data, (index / 2)));
 		}
 
 	},
 
 	remove(key, trans) {
-		this.removeWithHash(0, createHash(key), key, node, this.start(trans));
+		this.removeWithHash(0, createHash(key), key, this, this.start(trans));
 	}
 })
 
 
 
-function IndexedNode(owner, dataMap: number, nodeMap: number, items: Array): Node {
-	// return new Node(INDEXED_NODE, owner, items, dataMap, nodeMap, 0)
-	return new _IndexedNode(owner, dataMap, nodeMap, items)
-}
 
-function CollisionNode(owner, hash, length, items: Array): Node {
-	// return new Node(COLLISION_NODE, owner, items, hash, 0, length)
-	return new _CollisionNode(owner, hash, length, items)
-}
-
-
-var Trie = {
-	equals
-	, createHash
+var Trie = Object.assign({}, Bitwise, {
+	createHash
 
 	// = get value  =================================================================================
 
@@ -451,7 +491,7 @@ var Trie = {
 			bit = 1 << ((hash >>> shift) & 0x01f);
 
 			if ((dataMap & bit)) { // if in this node's data
-
+				// inlined Bitwise.hashFragment
 				i = dataMap & (bit - 1)
 				i = i - ((i >> 1) & 0x55555555);
 				i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
@@ -465,7 +505,7 @@ var Trie = {
 			if (!(nodeMap & bit)) {
 				return notFound
 			}
-
+			//inlined Bitwise.hashFragment
 			i = nodeMap & (bit - 1)
 			i = i - ((i >> 1) & 0x55555555);
 			i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
@@ -475,95 +515,6 @@ var Trie = {
 			shift += 5
 		}
 		return notFound
-	}
-
-	// = update/append =================================================================================
-
-
-	// = remove =================================================================================
-
-	, _indexedRemove(shift, hash, key, node, edit) {
-		var index;
-		var bit = this.bitpos(hash, shift);
-		var { dataMap, nodeMap, data } = node
-
-		if ((dataMap & bit) !== 0) {
-			index = this.hashFragment(dataMap, bit);
-
-			// hash may be the same, but since we use a higher perf hashing... that doesn't mean it's really the same key
-			if (key === data[2 * index]) {
-				this.setLengthChanged(edit);
-
-				if (this.popcount(dataMap) === 2 && (nodeMap === 0)) {
-
-					return IndexedNode(edit,
-						(shift === 0 ? dataMap ^ bit : this.bitpos(hash, 0)),
-						0, //nodeMap hash
-						(index === 0 ? data.slice(2, 4) : data.slice(0, 2)));
-				}
-
-				return IndexedNode(edit
-					, dataMap ^ bit
-					, nodeMap
-					, this.dualRemove(2 * index, data));
-			}
-			//no matching key
-			return node;
-		}
-
-		if ((nodeMap & bit) !== 0) {
-			index = data.length - 1 - this.hashFragment(nodeMap, bit);
-			var child = data[index];
-			var newChild = this.remove(shift + 5, hash, key, child, edit);
-
-			if (child !== newChild) {
-				if (this.isSingle(newChild)) {
-					if (dataMap === 0 && this.popcount(nodeMap) === 1) {
-						return newChild;
-					}
-
-					// if only one subnode, hoist values up one level
-					var newIndex = 2 * this.hashFragment(dataMap, bit);
-
-					return IndexedNode(edit
-						, dataMap | bit
-						, nodeMap ^ bit
-						, data
-							.slice(0, newIndex)
-							.concat(newChild.data.slice(0,2))
-							.concat(data.slice(newIndex, index))
-							.concat(data.slice(index + 1)));
-				}
-				return this._updateValue(index, newChild, node, edit);
-			}
-		}
-
-		return node;
-	}
-
-	, remove(shift: number, hash: number, key, node: Node, edit): Node {
-		if (node.type === INDEXED_NODE)
-			return this._indexedRemove(shift, hash, key, node, edit);
-
-		// Collision Node
-
-		var index = this._findMatchingKey(key,node);
-		if (index === -1)
-			return node;
-
-
-		this.setLengthChanged(edit);
-		switch (node.length) {
-			case 1:
-				return EMPTY;
-			case 2:
-				var data = node.data;
-				var idx = (this.equals(key, data[0])) ? 2 : 0;
-				return this.putWithHash(0, hash, data[idx], data[(idx + 1)], EMPTY, edit);
-			default:
-				return CollisionNode(edit, hash, (node.length - 1), this.aRemovePair(node.data, (index / 2)));
-		}
-
 	}
 
 	// = iterate =================================================================================
@@ -624,10 +575,7 @@ var Trie = {
 			}
 		}
 	}
-}
-Object.assign(Trie, Bitwise)
-Object.assign(Trie, Transaction)
-Object.assign(Trie, Arrays)
+})
 
 
 var EMPTY_ITERATOR = {
@@ -636,7 +584,7 @@ var EMPTY_ITERATOR = {
 	}
 };
 
-var EMPTY = IndexedNode(null, 0, 0, [])
+var EMPTY = new IndexedNode(null, 0, 0, [])
 
 
 // create common reducer helpers once, to save creating a function on every call
@@ -686,36 +634,50 @@ var Reducer = {
 
 export var Map = {
 	empty() {
+		//todo: return empty IronMap
 		return EMPTY;
 	}
 
 	, of(key, value) {
-		return Trie.put(key, value, EMPTY, null)
+		return new IronMap(EMPTY.put(key, value, null), 1)
 	}
 
 	, initialize(size, fn) {
-		var hamt = EMPTY
+		var trie = EMPTY
 		var trans = Transaction.start()
 
 		for (var i = 0; size > i; i++) {
 			var { key, value } = fn(i)
-			hamt = Trie.put(key, value, hamt, trans)
+			trie = trie.put(key, value, trie, trans)
 		}
 
-		return hamt
+		return trie
 	}
-	, put: (key, value, trie, transaction) => trie.put(key, value, transaction)
+	, put: (key, value, map, edit) => {
+		edit = Transaction.start(edit)
+		var trie = map.trie
+		var newTrie = trie.put(key, value, edit)
+		if (newTrie === trie)
+			return map;
 
-	, remove(key, node, transaction) {
+		return new IronMap(newTrie, edit.isLengthDifferent ? map.length + 1 : map.length)
+	}
 
-		return Trie.remove(0, createHash(key), key, node, Transaction.start(transaction));
+	, remove(key, map, edit) {
+		edit = Transaction.start(edit)
+		var trie = map.trie;
+		var newTrie = trie.remove(key, edit)
+		if (trie === newTrie)
+			return map;
+		return new IronMap(newTrie, edit.isLengthDifferent ? map.length - 1 : map.length)
 	}
 
 	, lookup: Trie.lookup.bind(Trie)
+	, get: Trie.lookup.bind(Trie)
 
-	, includes(key, trie) {
+	, includes(key, map) {
 		var NOT_FOUND = {}
-		return Trie.lookup(key, trie, NOT_FOUND) !== NOT_FOUND
+		return map.trie.get(key, NOT_FOUND) !== NOT_FOUND
 	}
 
 	, iterator: Trie.iterator
@@ -728,40 +690,48 @@ export var Map = {
 	, reduceWithKey: Trie.kvreduce
 
 	, map(fn, trie) {
+		//todo: return empty IronMap
 		return Trie.kvreduce(Reducer.mapFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, mapWithKey(fn, trie) {
+		//todo: return empty IronMap
 		return Trie.kvreduce(Reducer.mapWithKeyFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, filter(fn, trie) {
+		//todo: return empty IronMap
 		return Trie.kvreduce(Reducer.filterFn
 			, Reducer.FastFerry(fn)
 			, trie).hamt
 	}
 	, filterWithKey(fn, trie) {
+		//todo: return empty IronMap
 		return Trie.kvreduce(Reducer.filterWithKeyFn, Reducer.FastFerry(fn), trie).hamt
 	}
 
 	, merge(target, src) {
+		//todo: return empty IronMap
 		return Trie.kvreduce((ferry, key, value) => {
-			ferry.hamt = Trie.put(key, value, ferry.hamt, ferry.trans)
+			ferry.hamt = ferry.hamt.put(key, value, ferry.hamt, ferry.trans)
 			return ferry
 		}, { hamt: target, trans: Transaction() }, src).hamt
 	}
 
 };
 
-Object.assign(Node.prototype, {
-	lookup: Trie.lookup.bind(Trie)
-
-	, get: function(key, notFound) {
+Object.assign(CollisionNode.prototype, {
+	createHash,
+	lookup: Trie.lookup,
+	get: function(key, notFound) {
 		return this.lookup(key, this, notFound)
 	}
+})
 
-	, _put: Trie.put.bind(Trie)
-	, put: function(key, value) {
-		return this._put(key, value, this)
+Object.assign(IndexedNode.prototype, {
+	createHash,
+	lookup: Trie.lookup,
+	get: function(key, notFound) {
+		return this.lookup(key, this, notFound)
 	}
 })

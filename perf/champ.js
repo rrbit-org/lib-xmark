@@ -1752,58 +1752,41 @@ function MapEntry$2(key, value) {
 var INDEXED_NODE$2 = 0;
 var COLLISION_NODE$2 = 1;
 
-/**
- *
- * @param type - node type (INDEXED_NODE|COLLISION_NODE)
- * @param owner - any object which can represent the current
- * transaction. used to detect if mutation optimizations are
- * allowed
- * @param data - an array keys, values and subnodes
- * @param hash - used to calculate index of current concrete values
- * @param altHash - used to calculate index of subnodes
- * @param length
- * @constructor
- */
-function Node$2     (type, owner             , data            , hash$$1        , altHash        , length        ) {
+function IndexedNode$2(owner, dataMap        , nodeMap        , items       )       {
+	// return new _IndexedNode(owner, dataMap, nodeMap, items)
 
-
-	if (type === INDEXED_NODE$2) {
-		this.dataMap = hash$$1;
-		this.nodeMap = altHash;
-	} else { // CollisionNode
-		this.hash = hash$$1;
-		this.length = length;
-	}
-
-	this.data = data;
-	this.type = type;
-	this.edit = owner;
-}
-
-function _CollisionNode(owner, hash$$1, length, items) {
-	this.data = items;
-	this.hash = hash$$1;
-	this.edit = owner;
-	this.length = length;
-
-}
-
-function _IndexedNode(owner, dataMap, nodeMap, items) {
 	this.data = items;
 	this.dataMap = dataMap;
 	this.nodeMap = nodeMap;
 	this.edit = owner;
 }
 
-Object.assign(_IndexedNode.prototype, Arrays$2, Bitwise$2, Transaction$1, {
+function CollisionNode$2(owner, hash$$1, length, items       )       {
+	// return new Node(COLLISION_NODE, owner, items, hash, 0, length)
+	// return new _CollisionNode(owner, hash, length, items)
+
+	this.data = items;
+	this.hash = hash$$1;
+	this.edit = owner;
+	this.length = length;
+}
+
+Object.assign(IndexedNode$2.prototype, Arrays$2, Bitwise$2, Transaction$1, {
 	createHash: hash,
 
-	_updateValue(idx, value, node, edit) {
-		if (this.isAllowedToEdit(node.edit, edit)) {
-			node.data[idx] = value;
-			return node;
+	// = update/append =================================================================================
+	isSingle(node      ) {
+		if (node.type === COLLISION_NODE$2)
+			return node.length === 1;
+		return (this.popcount(node.dataMap) === 2) && (node.nodeMap === 0)
+	},
+
+	_updateValue(idx, value, iNode, edit) {
+		if (this.isAllowedToEdit(iNode.edit, edit)) {
+			iNode.data[idx] = value;
+			return iNode;
 		}
-		return IndexedNode$2(edit, node.dataMap, node.nodeMap, this.aUpdate(idx, value, node.data));
+		return new IndexedNode$2(edit, iNode.dataMap, iNode.nodeMap, this.aUpdate(idx, value, iNode.data));
 	},
 
 	_copyAndMigrateToNode(bit, child, node, edit) {
@@ -1819,18 +1802,18 @@ Object.assign(_IndexedNode.prototype, Arrays$2, Bitwise$2, Transaction$1, {
 		// drop second key + value
 		this.aCopy(data, (2 + newIndex), squashed, (newIndex + 1), (data.length - 2 - newIndex));
 
-		return IndexedNode$2(edit, (dataMap ^ bit), (nodeMap | bit), squashed);
+		return new IndexedNode$2(edit, (dataMap ^ bit), (nodeMap | bit), squashed);
 	},
 
 	_mergeTwoKeyValuePairs(shift, oldHash, oldKey, oldValue, hash$$1, key, value, edit) {
 		if ((32 < shift) && (oldHash === hash$$1)) {
-			return CollisionNode$2(edit, oldHash, 2, [oldKey, oldValue, key, value]);
+			return new CollisionNode$2(edit, oldHash, 2, [oldKey, oldValue, key, value]);
 		}
 		var oldMask = this.mask(oldHash, shift)
 			, mask = this.mask(hash$$1, shift);
 
 		if (oldMask === mask) {
-			return IndexedNode$2(edit
+			return new IndexedNode$2(edit
 				, 0
 				, this.bitpos(oldHash, shift)
 				, [ this._mergeTwoKeyValuePairs((shift + 5)
@@ -1844,7 +1827,7 @@ Object.assign(_IndexedNode.prototype, Arrays$2, Bitwise$2, Transaction$1, {
 		}
 
 		var arr = oldMask < mask ? [oldKey, oldValue, key, value] : [key, value, oldKey, oldValue];
-		return IndexedNode$2(edit, (this.bitpos(oldHash, shift) | this.bitpos(hash$$1, shift)), 0, arr);
+		return new IndexedNode$2(edit, (this.bitpos(oldHash, shift) | this.bitpos(hash$$1, shift)), 0, arr);
 	},
 
 	putWithHash(shift, hash$$1, key, value, node, edit) { // IndexedNode specific
@@ -1877,13 +1860,13 @@ Object.assign(_IndexedNode.prototype, Arrays$2, Bitwise$2, Transaction$1, {
 		} else if ((nodeMap & bit) !== 0) { // is in existing child node
 			var index = data.length - 1 - this.hashFragment(nodeMap, bit);
 			var child = data[index];
-			var newChild = this.putWithHash(shift + 5, hash$$1, key, value, child, edit);
+			var newChild = child.putWithHash(shift + 5, hash$$1, key, value, child, edit);
 
 			return child === newChild ? node : this._updateValue(index, newChild, node, edit);
 		}
 
 		// does not exist, insert as new key/value
-		return IndexedNode$2(this.setLengthChanged(edit)
+		return new IndexedNode$2(this.setLengthChanged(edit)
 			, (dataMap | bit)
 			, nodeMap
 			, this.aInsertPair((2 * this.hashFragment(dataMap, bit)), key, value, data));
@@ -1892,14 +1875,81 @@ Object.assign(_IndexedNode.prototype, Arrays$2, Bitwise$2, Transaction$1, {
 	put(key, value, transaction) {
 		return this.putWithHash(0, this.createHash(key), key, value, this, this.start(transaction))
 	},
+
+	// = remove =================================================================================
+
+	removeWithHash(shift, hash$$1, key, node, edit) {
+		var index;
+		var bit = this.bitpos(hash$$1, shift);
+		var { dataMap, nodeMap, data } = node;
+
+		if ((dataMap & bit) !== 0) {
+			index = this.hashFragment(dataMap, bit);
+
+			// hash may be the same, but since we use a higher perf hashing... that doesn't mean it's really the same key
+			if (key === data[2 * index]) {
+				this.setLengthChanged(edit);
+
+				if (this.popcount(dataMap) === 2 && (nodeMap === 0)) {
+
+					return new IndexedNode$2(edit,
+						(shift === 0 ? dataMap ^ bit : this.bitpos(hash$$1, 0)),
+						0, //nodeMap hash
+						(index === 0 ? data.slice(2, 4) : data.slice(0, 2)));
+				}
+
+				return new IndexedNode$2(edit
+					, dataMap ^ bit
+					, nodeMap
+					, this.dualRemove(2 * index, data));
+			}
+			//no matching key
+			return node;
+		}
+
+		if ((nodeMap & bit) !== 0) {
+			index = data.length - 1 - this.hashFragment(nodeMap, bit);
+			var child = data[index];
+			var newChild = this.remove(shift + 5, hash$$1, key, child, edit);
+
+			if (child !== newChild) {
+				if (this.isSingle(newChild)) {
+					if (dataMap === 0 && this.popcount(nodeMap) === 1) {
+						return newChild;
+					}
+
+					// if only one subnode, hoist values up one level
+					var newIndex = 2 * this.hashFragment(dataMap, bit);
+
+					return new IndexedNode$2(edit
+						, dataMap | bit
+						, nodeMap ^ bit
+						, data
+							.slice(0, newIndex)
+							.concat(newChild.data.slice(0,2))
+							.concat(data.slice(newIndex, index))
+							.concat(data.slice(index + 1)));
+				}
+				return this._updateValue(index, newChild, node, edit);
+			}
+		}
+
+		return node;
+	},
+
+	remove(key, trans) {
+		this.removeWithHash(0, hash(key), key, node, this.start(trans));
+	},
 });
 
 
 
 
-Object.assign(_CollisionNode.prototype, Arrays$2, Bitwise$2, Transaction$1, {
+Object.assign(CollisionNode$2.prototype, Arrays$2, Bitwise$2, Transaction$1, {
+	equals: equals$2,
 	createHash: hash,
 
+	// = update/append =================================================================================
 	_findMatchingKey(key, collisionNode) {
 		var { length, data } = collisionNode;
 		for (var i = 0; i < length; i += 2) {
@@ -1908,6 +1958,11 @@ Object.assign(_CollisionNode.prototype, Arrays$2, Bitwise$2, Transaction$1, {
 			}
 		}
 		return -1;
+	},
+
+	putWithHash(shift, hash$$1, key, value, node, edit) {
+		//throw new Error('oops, not implemented yet')
+		return this.put(key, value, edit)
 	},
 
 	put(key, value, edit) {
@@ -1933,37 +1988,48 @@ Object.assign(_CollisionNode.prototype, Arrays$2, Bitwise$2, Transaction$1, {
 			if (node.data[index + 1] === value) { // value is same, do nothing
 				return node;
 			}
-			return CollisionNode$2(edit, node.hash, (node.length + 1), this.aUpdate(index + 1, value, node.data));
+			return new CollisionNode$2(edit, node.hash, (node.length + 1), this.aUpdate(index + 1, value, node.data));
 		}
 		newArray = this.dualInsert(node.data.length, key, value, node.data);
 		this.setLengthChanged(edit);
-		return CollisionNode$2(edit, node.hash, node.length + 1, newArray);
+		return new CollisionNode$2(edit, node.hash, node.length + 1, newArray);
 	},
+
+
+
+
+	// = remove =================================================================================
+	removeWithHash(shift        , hash$$1        , key, node, edit) {
+
+		var index = this._findMatchingKey(key, node);
+		if (index === -1)
+			return node;
+
+
+		this.setLengthChanged(edit);
+		switch (node.length) {
+			case 1:
+				return EMPTY$2;
+			case 2:
+				var data = node.data;
+				var idx = (this.equals(key, data[0])) ? 2 : 0;
+				return EMPTY$2.putWithHash(0, hash$$1, data[idx], data[(idx + 1)], EMPTY$2, edit);
+			default:
+				return new CollisionNode$2(edit, hash$$1, (node.length - 1), this.aRemovePair(node.data, (index / 2)));
+		}
+
+	},
+
+	remove(key, trans) {
+		this.removeWithHash(0, hash(key), key, this, this.start(trans));
+	}
 });
 
 
 
-function IndexedNode$2(owner, dataMap        , nodeMap        , items       )       {
-	// return new Node(INDEXED_NODE, owner, items, dataMap, nodeMap, 0)
-	return new _IndexedNode(owner, dataMap, nodeMap, items)
-}
 
-function CollisionNode$2(owner, hash$$1, length, items       )       {
-	// return new Node(COLLISION_NODE, owner, items, hash, 0, length)
-	return new _CollisionNode(owner, hash$$1, length, items)
-}
-
-
-var Trie$1 = {
-	equals: equals$2
-	, createHash: hash
-
-	// useful when attempting to squash
-	, isSingle(node      ) {
-		if (node.type === COLLISION_NODE$2)
-			return node.length === 1;
-		return (this.popcount(node.dataMap) === 2) && (node.nodeMap === 0)
-	}
+var Trie$1 = Object.assign({}, Bitwise$2, {
+	createHash: hash
 
 	// = get value  =================================================================================
 
@@ -1993,7 +2059,7 @@ var Trie$1 = {
 			bit = 1 << ((hash$$1 >>> shift) & 0x01f);
 
 			if ((dataMap & bit)) { // if in this node's data
-
+				// inlined Bitwise.hashFragment
 				i = dataMap & (bit - 1);
 				i = i - ((i >> 1) & 0x55555555);
 				i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
@@ -2007,7 +2073,7 @@ var Trie$1 = {
 			if (!(nodeMap & bit)) {
 				return notFound
 			}
-
+			//inlined Bitwise.hashFragment
 			i = nodeMap & (bit - 1);
 			i = i - ((i >> 1) & 0x55555555);
 			i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
@@ -2017,233 +2083,6 @@ var Trie$1 = {
 			shift += 5;
 		}
 		return notFound
-	}
-
-	// = update/append =================================================================================
-
-	, _findMatchingKey(key, collisionNode) {
-		var { length, data } = collisionNode;
-		for (var i = 0; i < length; i += 2) {
-			if (this.equals(key, data[i])) {
-				return i;
-			}
-		}
-		return -1;
-	}
-
-	, _updateValue(idx, value, node, edit) {
-		if (this.isAllowedToEdit(node.edit, edit)) {
-			node.data[idx] = value;
-			return node;
-		}
-		return IndexedNode$2(edit, node.dataMap, node.nodeMap, this.aUpdate(idx, value, node.data));
-	}
-
-	, _copyAndMigrateToNode(bit, child, node, edit) {
-		var { data, nodeMap, dataMap } = node;
-		var oldIndex = (2 * this.hashFragment(dataMap, bit));
-		var newIndex = (data.length - 2 - this.hashFragment(nodeMap, bit));
-
-		var squashed = new Array(data.length - 1);
-		// drop first key + value
-		this.aCopy(data, 0, squashed, 0, oldIndex);
-		this.aCopy(data, (2 + oldIndex), squashed, oldIndex, (newIndex - oldIndex));
-		squashed[newIndex] = child;
-		// drop second key + value
-		this.aCopy(data, (2 + newIndex), squashed, (newIndex + 1), (data.length - 2 - newIndex));
-
-		return IndexedNode$2(edit, (dataMap ^ bit), (nodeMap | bit), squashed);
-	}
-
-	, _mergeTwoKeyValuePairs(shift, oldHash, oldKey, oldValue, hash$$1, key, value, edit) {
-		if ((32 < shift) && (oldHash === hash$$1)) {
-			return CollisionNode$2(edit, oldHash, 2, [oldKey, oldValue, key, value]);
-		}
-		var oldMask = this.mask(oldHash, shift)
-			, mask = this.mask(hash$$1, shift);
-
-		if (oldMask === mask) {
-			return IndexedNode$2(edit
-				, 0
-				, this.bitpos(oldHash, shift)
-				, [ this._mergeTwoKeyValuePairs((shift + 5)
-					, oldHash
-					, oldKey
-					, oldValue
-					, hash$$1
-					, key
-					, value
-					, edit) ]);
-		}
-
-		var arr = oldMask < mask ? [oldKey, oldValue, key, value] : [key, value, oldKey, oldValue];
-		return IndexedNode$2(edit, (this.bitpos(oldHash, shift) | this.bitpos(hash$$1, shift)), 0, arr);
-	}
-
-	, _indexedPut(shift, hash$$1, key, value, node, edit) {
-		var bit = this.bitpos(hash$$1, shift);
-		var { data, nodeMap, dataMap } = node;
-
-		if ((dataMap & bit) !== 0) { // is existing key/value
-			var idx = 2 * this.hashFragment(dataMap, bit);
-			var existingKey = data[idx];
-
-			if (key === existingKey) {
-				return this._updateValue(idx + 1, value, node, edit);
-			}
-
-			var oldValue = node.data[idx + 1];
-			var newChild = this._mergeTwoKeyValuePairs((shift + 5)
-				, hash(existingKey)
-				, existingKey
-				, oldValue
-				, hash$$1
-				, key
-				, value
-				, edit);
-
-			return this._copyAndMigrateToNode(bit
-				, newChild
-				, node
-				, this.setLengthChanged(edit));
-
-		} else if ((nodeMap & bit) !== 0) { // is in existing child node
-			var index = data.length - 1 - this.hashFragment(nodeMap, bit);
-			var child = data[index];
-			var newChild = this.putWithHash(shift + 5, hash$$1, key, value, child, edit);
-
-			return child === newChild ? node : this._updateValue(index, newChild, node, edit);
-		}
-
-		// does not exist, insert as new key/value
-		return IndexedNode$2(this.setLengthChanged(edit)
-			, (dataMap | bit)
-			, nodeMap
-			, this.aInsertPair((2 * this.hashFragment(dataMap, bit)), key, value, data));
-	}
-
-	, _collisionPut(shift, hash$$1, key, value, node, edit) {
-		var newArray;
-		var index = this._findMatchingKey(key, node);
-		// transient put
-		if (this.isAllowedToEdit(node.edit, edit)) {
-			if (index === -1) {
-				this.setLengthChanged(edit);
-
-				node.data = this.dualInsert(node.data.length, key, value, node.data);
-				node.length += 1;
-			} else if (node.data[index + 1] !== value) {
-				node.data[index + 1] = value;
-			}
-			return node;
-		}
-
-		// immutable put
-		if (index !== -1) {
-			if (node.data[index + 1] === value) { // value is same, do nothing
-				return node;
-			}
-			return CollisionNode$2(edit, node.hash, (node.length + 1), this.aUpdate(index + 1, value, node.data));
-		}
-		newArray = [...node.data, key, value];
-		this.setLengthChanged(edit);
-		return CollisionNode$2(edit, node.hash, node.length + 1, newArray);
-	}
-
-	, putWithHash(shift, hash$$1, key, value, node, edit) {
-		if (node.type === COLLISION_NODE$2)
-			return this._collisionPut(shift, hash$$1, key, value, node, edit)
-
-		return this._indexedPut(shift, hash$$1, key, value, node, edit)
-	}
-	, put(key, value, node, transaction) {
-		return this.putWithHash(0, this.createHash(key), key, value, node, Transaction$1.start(transaction))
-	}
-
-	// = remove =================================================================================
-
-	, _indexedRemove(shift, hash$$1, key, node, edit) {
-		var index;
-		var bit = this.bitpos(hash$$1, shift);
-		var { dataMap, nodeMap, data } = node;
-
-		if ((dataMap & bit) !== 0) {
-			index = this.hashFragment(dataMap, bit);
-
-			// hash may be the same, but since we use a higher perf hashing... that doesn't mean it's really the same key
-			if (key === data[2 * index]) {
-				this.setLengthChanged(edit);
-
-				if (this.popcount(dataMap) === 2 && (nodeMap === 0)) {
-
-					return IndexedNode$2(edit,
-						(shift === 0 ? dataMap ^ bit : this.bitpos(hash$$1, 0)),
-						0, //nodeMap hash
-						(index === 0 ? data.slice(2, 4) : data.slice(0, 2)));
-				}
-
-				return IndexedNode$2(edit
-					, dataMap ^ bit
-					, nodeMap
-					, this.dualRemove(2 * index, data));
-			}
-			//no matching key
-			return node;
-		}
-
-		if ((nodeMap & bit) !== 0) {
-			index = data.length - 1 - this.hashFragment(nodeMap, bit);
-			var child = data[index];
-			var newChild = this.remove(shift + 5, hash$$1, key, child, edit);
-
-			if (child !== newChild) {
-				if (this.isSingle(newChild)) {
-					if (dataMap === 0 && this.popcount(nodeMap) === 1) {
-						return newChild;
-					}
-
-					// if only one subnode, hoist values up one level
-					var newIndex = 2 * this.hashFragment(dataMap, bit);
-
-					return IndexedNode$2(edit
-						, dataMap | bit
-						, nodeMap ^ bit
-						, data
-							.slice(0, newIndex)
-							.concat(newChild.data.slice(0,2))
-							.concat(data.slice(newIndex, index))
-							.concat(data.slice(index + 1)));
-				}
-				return this._updateValue(index, newChild, node, edit);
-			}
-		}
-
-		return node;
-	}
-
-	, remove(shift        , hash$$1        , key, node      , edit)       {
-		if (node.type === INDEXED_NODE$2)
-			return this._indexedRemove(shift, hash$$1, key, node, edit);
-
-		// Collision Node
-
-		var index = this._findMatchingKey(key,node);
-		if (index === -1)
-			return node;
-
-
-		this.setLengthChanged(edit);
-		switch (node.length) {
-			case 1:
-				return EMPTY$2;
-			case 2:
-				var data = node.data;
-				var idx = (this.equals(key, data[0])) ? 2 : 0;
-				return this.putWithHash(0, hash$$1, data[idx], data[(idx + 1)], EMPTY$2, edit);
-			default:
-				return CollisionNode$2(edit, hash$$1, (node.length - 1), this.aRemovePair(node.data, (index / 2)));
-		}
-
 	}
 
 	// = iterate =================================================================================
@@ -2304,13 +2143,10 @@ var Trie$1 = {
 			}
 		}
 	}
-};
-Object.assign(Trie$1, Bitwise$2);
-Object.assign(Trie$1, Transaction$1);
-Object.assign(Trie$1, Arrays$2);
+});
 
 
-var EMPTY$2 = IndexedNode$2(null, 0, 0, []);
+var EMPTY$2 = new IndexedNode$2(null, 0, 0, []);
 
 
 // create common reducer helpers once, to save creating a function on every call
@@ -2420,23 +2256,26 @@ var Map$2 = {
 
 	, merge(target, src) {
 		return Trie$1.kvreduce((ferry, key, value) => {
-			ferry.hamt = Trie$1.put(key, value, ferry.hamt, ferry.trans);
+			ferry.hamt = ferry.hamt.put(key, value, ferry.hamt, ferry.trans);
 			return ferry
 		}, { hamt: target, trans: Transaction$1() }, src).hamt
 	}
 
 };
 
-Object.assign(Node$2.prototype, {
-	lookup: Trie$1.lookup.bind(Trie$1)
-
-	, get: function(key, notFound) {
+Object.assign(CollisionNode$2.prototype, {
+	createHash: hash,
+	lookup: Trie$1.lookup,
+	get: function(key, notFound) {
 		return this.lookup(key, this, notFound)
 	}
+});
 
-	, _put: Trie$1.put.bind(Trie$1)
-	, put: function(key, value) {
-		return this._put(key, value, this)
+Object.assign(IndexedNode$2.prototype, {
+	createHash: hash,
+	lookup: Trie$1.lookup,
+	get: function(key, notFound) {
+		return this.lookup(key, this, notFound)
 	}
 });
 
