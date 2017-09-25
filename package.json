@@ -16,7 +16,7 @@
     "benchmark": "^2.1.4",
     "eslint-plugin-flowtype": "^2.35.1",
     "flow-bin": "^0.54.1",
-    "hamt": "^2.2.0",
+    "hamt": "^2.2.1",
     "immutable": "^3.8.1",
     "jest": "^21.0.1",
     "mori": "^0.3.2",

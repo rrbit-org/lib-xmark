@@ -7,7 +7,8 @@ var runSuite = require('./runSuite'),
 	CollectableMap = require('@collectable/map'),
 	champ = require('./champ'),
 	Inline = champ.Inline,
-	Entry = champ.Entry
+	Entry = champ.Entry,
+	Hamt = champ.Hamt
 
 ;
 
@@ -31,12 +32,12 @@ suite.add('faucett', function() {
 		map = map.set('key' + i, 'val' + i)
 })
 
-suite.add('mori', function() {
-	var map = mori.hashMap(0,0)
-	for (var i = 0; SIZE > i; i++)
-		map = mori.assoc(map,'key' + i, 'val' + i)
-	//mori.hashMap(0, 1, 2, 3);
-})
+// suite.add('mori', function() {
+// 	var map = mori.hashMap(0,0)
+// 	for (var i = 0; SIZE > i; i++)
+// 		map = mori.assoc(map,'key' + i, 'val' + i)
+// 	//mori.hashMap(0, 1, 2, 3);
+// })
 
 suite.add('hamt', function() {
 	var map = hamt.empty
@@ -53,13 +54,19 @@ suite.add('collectable', function() {
 suite.add('champ:inline', function() {
 	var map = Inline.empty()
 	for (var i = 0; SIZE > i; i++)
-		map = Inline.put('key' + i, 'val' + i, map)
+		map = map.put('key' + i, 'val' + i)
 })
 
 suite.add('champ:entry', function() {
 	var map = Entry.empty()
 	for (var i = 0; SIZE > i; i++)
 		map = Entry.put('key' + i, 'val' + i, map)
+})
+
+suite.add('champ:hamt', function() {
+	var map = Hamt.empty
+	for (var i = 0; SIZE > i; i++)
+		map = map.set('key' + i, 'val' + i)
 })
 
 suite.add('native js object', function() {

@@ -94,10 +94,10 @@ suite.add('immutable-js', function() {
 })
 
 
-suite.add('mori', function() {
-	for (var i = 0; SIZE > i; i++)
-		 var value = mori.get('key' + i, data.mori)
-})
+// suite.add('mori', function() {
+// 	for (var i = 0; SIZE > i; i++)
+// 		 var value = mori.get('key' + i, data.mori)
+// })
 
 suite.add('hamt', function() {
 	for (var i = 0; SIZE > i; i++)
@@ -112,7 +112,7 @@ suite.add('collectable', function() {
 suite.add('champ:inline', function() {
 	var map = data.champ_in
 	for (var i = 0; SIZE > i; i++)
-		 var value = Inline.lookup('key' + i, map)
+		 var value = map.get('key' + i)
 })
 
 suite.add('champ:entry', function() {

@@ -229,10 +229,14 @@ function hash(o) {
 		var len = o.length, hash = 0;
 		if (len > 16) return CACHE.getOrCreate(o, hashString);
 
-		for (var i = 0; len > i; i++) {
-			hash = 31 * hash + o.charCodeAt(i) | 0;
+		// for (var i = 0; len > i; i++) {
+		// 	hash = 31 * hash + o.charCodeAt(i) | 0;
+		// }
+		// return hash >>> 1 & 0x40000000 | hash & 0xbfffffff
+		for (var i = 0; i < len; ++i) {
+			hash = (hash << 5) - hash + o.charCodeAt(i) | 0;
 		}
-		return hash >>> 1 & 0x40000000 | hash & 0xbfffffff
+		return hash;
 
 	}
 	if (type === 'number') {
@@ -412,10 +416,12 @@ function MapEntry(key, value) {
 	this.value = value;
 }
 
+var INDEXED_NODE = 0;
+var COLLISION_NODE = 1;
 
 /**
  *
- * @param type - node type ('IndexedNode'|'CollisionNode')
+ * @param type - node type (INDEXED_NODE|COLLISION_NODE)
  * @param owner - any object which can represent the current
  * transaction. used to detect if mutation optimizations are
  * allowed
@@ -430,7 +436,7 @@ function Node(type, owner , data                 , hash$$1        , altHash     
 	this.data = data;
 	this.type = type;
 
-	if (type === 'IndexedNode') {
+	if (type === INDEXED_NODE) {
 		this.dataMap = hash$$1;
 		this.nodeMap = altHash;
 	} else { // CollisionNode
@@ -439,12 +445,16 @@ function Node(type, owner , data                 , hash$$1        , altHash     
 	}
 }
 
+Node.prototype.get = function(key, notFound) {
+	return NodeTrait.lookup(key, this, notFound)
+};
+
 function IndexedNode(owner, dataMap        , nodeMap        , items                 )                  {
-	return new Node('IndexedNode', owner, items, dataMap, nodeMap)
+	return new Node(INDEXED_NODE, owner, items, dataMap, nodeMap)
 }
 
 function CollisionNode(owner, hash$$1, items                 )                    {
-	return new Node('CollisionNode', owner, items, hash$$1, null)
+	return new Node(COLLISION_NODE, owner, items, hash$$1, null)
 }
 
 
@@ -457,7 +467,7 @@ const NodeTrait = {
 
 	// useful when attempting to squash
 	, isSingle(node          ) {
-		if (node.type === 'CollisionNode')
+		if (node.type === COLLISION_NODE)
 			return node.data.length === 1;
 		return (this.popcount(node.dataMap) === 1) && (node.nodeMap === 0)
 	}
@@ -466,18 +476,23 @@ const NodeTrait = {
 
 	, lookup(key, node, notFound) {
 		var bit = 0,
+			i = 0,
 			shift = 0,
 			nodeMap = 0,
 			dataMap = 0,
-			hash$$1 = hash(key),
+			hash$$1 = this.createHash(key),
 			data,
 			entry;
 
 		while (node) {
 			data = node.data;
 
-			if (node.type === 'CollisionNode') {
-				return this._lookupCollision(key, data, notFound)
+			if (node.type === 1) { //COLLISION_NODE
+				for (i = 0, len = data.length; len > i; i += 2) {
+					if (key === data[i])
+						return data[i + 1];
+				}
+				return notFound
 			}
 
 			nodeMap = node.nodeMap;
@@ -487,14 +502,24 @@ const NodeTrait = {
 
 			if ((dataMap & bit)) { // if in this node's data
 
-				entry = data[this.hashFragment(dataMap, bit)];
+				i = dataMap & (bit - 1);
+				i = i - ((i >> 1) & 0x55555555);
+				i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
+				i = ((i + (i >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
+				entry = data[i];
 				return key === entry.key ? entry.value : notFound;
 			}
 
 			if (!(nodeMap & bit)) {
 				return notFound
 			}
-			node = data[data.length - 1 - this.hashFragment(nodeMap, bit)];
+
+			i = nodeMap & (bit - 1);
+			i = i - ((i >> 1) & 0x55555555);
+			i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
+			i = ((i + (i >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
+
+			node = data[data.length - 1 - i];
 			shift += 5;
 		}
 		return notFound
@@ -518,7 +543,7 @@ const NodeTrait = {
 		var data = node.data
 			, entry;
 
-		if (node.type === 'CollisionNode') {
+		if (node.type === COLLISION_NODE) {
 			for (var i = 0, len = data.length; len > i; i += 1) {
 				entry = data[i];
 				if (this.equals(key, entry.key))
@@ -675,7 +700,7 @@ const NodeTrait = {
 	}
 
 	, put(shift, hash$$1, entry          , node          , edit             )       {
-		if (node.type === 'CollisionNode')
+		if (node.type === COLLISION_NODE)
 			return this._CollisionPut(shift, hash$$1, entry, (node                   ), edit)
 
 		return this._IndexedPut(shift, hash$$1, entry, (node                 ), edit)
@@ -737,7 +762,7 @@ const NodeTrait = {
 	}
 
 	, remove(shift        , hash$$1        , key     , node          , edit )       {
-		if (node.type === 'IndexedNode')
+		if (node.type === INDEXED_NODE)
 			return this._IndexedRemove(shift, hash$$1, key, (node                 ), edit);
 
 		// Collision Node
@@ -763,7 +788,7 @@ const NodeTrait = {
 	, kvreduce(fn          , seed   , node          )    {
 		var data = node.data;
 
-		if (node.type === 'IndexedNode') {
+		if (node.type === INDEXED_NODE) {
 			var entryLen = this.popcount((node             ).dataMap);
 			var nodeLen = entryLen + this.popcount((node             ).nodeMap);
 
@@ -956,7 +981,10 @@ var Bitwise$1 = {
 	}
 
 	, hashFragment(bitmap, bit) {
-		return this.popcount(bitmap & (bit - 1));
+		var v = bitmap & (bit - 1);
+		v = v - ((v >> 1) & 0x55555555);
+		v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
+		return ((v + (v >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
 	}
 
 	, toBitmap(x) {
@@ -1020,10 +1048,12 @@ function MapEntry$1(key, value) {
 	this.value = value;
 }
 
+var INDEXED_NODE$1 = 0;
+var COLLISION_NODE$1 = 1;
 
 /**
  *
- * @param type - node type ('IndexedNode'|'CollisionNode')
+ * @param type - node type (INDEXED_NODE|COLLISION_NODE)
  * @param owner - any object which can represent the current
  * transaction. used to detect if mutation optimizations are
  * allowed
@@ -1036,7 +1066,7 @@ function MapEntry$1(key, value) {
 function Node$1     (type, owner             , data            , hash$$1        , altHash        , length        ) {
 
 
-	if (type === 'IndexedNode') {
+	if (type === INDEXED_NODE$1) {
 		this.dataMap = hash$$1;
 		this.nodeMap = altHash;
 	} else { // CollisionNode
@@ -1050,11 +1080,11 @@ function Node$1     (type, owner             , data            , hash$$1        
 }
 
 function IndexedNode$1(owner, dataMap        , nodeMap        , items       )       {
-	return new Node$1('IndexedNode', owner, items, dataMap, nodeMap, 0)
+	return new Node$1(INDEXED_NODE$1, owner, items, dataMap, nodeMap, 0)
 }
 
 function CollisionNode$1(owner, hash$$1, length, items       )       {
-	return new Node$1('CollisionNode', owner, items, hash$$1, 0, length)
+	return new Node$1(COLLISION_NODE$1, owner, items, hash$$1, 0, length)
 }
 
 
@@ -1064,7 +1094,7 @@ var Trie = {
 
 	// useful when attempting to squash
 	, isSingle(node      ) {
-		if (node.type === 'CollisionNode')
+		if (node.type === COLLISION_NODE$1)
 			return node.length === 1;
 		return (this.popcount(node.dataMap) === 2) && (node.nodeMap === 0)
 	}
@@ -1083,33 +1113,42 @@ var Trie = {
 		while (node) {
 			data = node.data;
 
-			if (node.type === 'CollisionNode') {
-				return this._lookupCollision(key, data, notFound)
+			if (node.type === 1) { // collision node
+				for (i = 0, len = data.length; len > i; i += 2) {
+					if (key === data[i])
+						return data[i + 1];
+				}
+				return notFound
 			}
 
-			nodeMap = node.nodeMap;
+
 			dataMap = node.dataMap;
 			// IndexedNode
 			bit = 1 << ((hash$$1 >>> shift) & 0x01f);
 
 			if ((dataMap & bit)) { // if in this node's data
 
-				i = 2 * this.hashFragment(dataMap, bit);
+				i = dataMap & (bit - 1);
+				i = i - ((i >> 1) & 0x55555555);
+				i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
+				i = ((i + (i >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
+
+				i = 2 * i;
 				return key === data[i] ? data[i + 1] : notFound;
 			}
 
+			nodeMap = node.nodeMap;
 			if (!(nodeMap & bit)) {
 				return notFound
 			}
-			node = data[data.length - 1 - this.hashFragment(nodeMap, bit)];
+
+			i = nodeMap & (bit - 1);
+			i = i - ((i >> 1) & 0x55555555);
+			i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
+			i = ((i + (i >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
+
+			node = data[data.length - 1 - i];
 			shift += 5;
-		}
-		return notFound
-	}
-	, _lookupCollision(key, entries, notFound) {
-		for (var i = 0, len = entries.length; len > i; i += 2) {
-			if (key === entries[i])
-				return entries[i + 1];
 		}
 		return notFound
 	}
@@ -1205,7 +1244,7 @@ var Trie = {
 		} else if ((nodeMap & bit) !== 0) { // is in existing child node
 			var index = data.length - 1 - this.hashFragment(nodeMap, bit);
 			var child = data[index];
-			var newChild = this.put(shift + 5, hash$$1, key, value, child, edit);
+			var newChild = this.putWithHash(shift + 5, hash$$1, key, value, child, edit);
 
 			return child === newChild ? node : this._updateValue(index, newChild, node, edit);
 		}
@@ -1245,11 +1284,14 @@ var Trie = {
 		return CollisionNode$1(edit, node.hash, node.length + 1, newArray);
 	}
 
-	, put(shift, hash$$1, key, value, node, edit) {
-		if (node.type === 'CollisionNode')
+	, putWithHash(shift, hash$$1, key, value, node, edit) {
+		if (node.type === COLLISION_NODE$1)
 			return this._collisionPut(shift, hash$$1, key, value, node, edit)
 
 		return this._indexedPut(shift, hash$$1, key, value, node, edit)
+	}
+	, put(key, value, node, transaction) {
+		return this.putWithHash(0, this.createHash(key), key, value, node, Transaction.start(transaction))
 	}
 
 	// = remove =================================================================================
@@ -1314,7 +1356,7 @@ var Trie = {
 	}
 
 	, remove(shift        , hash$$1        , key, node      , edit)       {
-		if (node.type === 'IndexedNode')
+		if (node.type === INDEXED_NODE$1)
 			return this._indexedRemove(shift, hash$$1, key, node, edit);
 
 		// Collision Node
@@ -1331,7 +1373,7 @@ var Trie = {
 			case 2:
 				var data = node.data;
 				var idx = (this.equals(key, data[0])) ? 2 : 0;
-				return this.put(0, hash$$1, data[idx], data[(idx + 1)], EMPTY$1, edit);
+				return this.putWithHash(0, hash$$1, data[idx], data[(idx + 1)], EMPTY$1, edit);
 			default:
 				return CollisionNode$1(edit, hash$$1, (node.length - 1), this.aRemovePair(node.data, (index / 2)));
 		}
@@ -1343,7 +1385,7 @@ var Trie = {
 	, kvreduce   (fn, seed   , node      )    {
 		var data = node.data;
 
-		if (node.type === 'IndexedNode') {
+		if (node.type === INDEXED_NODE$1) {
 			var entryLen = (2 * this.popcount(node.dataMap));
 			var nodeLen = entryLen + this.popcount(node.nodeMap);
 
@@ -1372,7 +1414,7 @@ var Trie = {
 	, iterator: function* iterator(node) {
 		var data = node.data;
 
-		if (node.type === 'IndexedNode') {
+		if (node.type === INDEXED_NODE$1) {
 			var entryLen = (2 * this.popcount(node.dataMap));
 			var nodeLen = entryLen + this.popcount(node.nodeMap);
 
@@ -1410,7 +1452,7 @@ var Reducer = {
 	// store common values on the reducer's seed/accumulator to avoid closures(faster)
 	FastFerry: function FastFerry(fn, seed) {
 		if (!(this instanceof FastFerry))
-			return new FastFerry(fn);
+			return new FastFerry(fn, seed);
 
 		this.hamt = EMPTY$1;
 		this.trans = Transaction.start();
@@ -1420,25 +1462,25 @@ var Reducer = {
 
 	, mapFn(ferry, key, value) {
 
-		ferry.map = Trie.put(0, hash(key), key, ferry.fn(value), ferry.hamt, ferry.trans);
+		ferry.hamt = Trie.put(key, ferry.fn(value), ferry.hamt, ferry.trans);
 		return ferry
 	}
 	, mapWithKeyFn(ferry, key, value) {
 
-		ferry.map = Trie.put(0, hash(key), key, ferry.fn(key, value), ferry.hamt, ferry.trans);
+		ferry.hamt = Trie.put(key, ferry.fn(key, value), ferry.hamt, ferry.trans);
 		return ferry
 	}
 
 	, filterFn(ferry, key, value) {
 		if (ferry.fn(value))
-			ferry.map = Trie.put(0, hash(key), key, value, ferry.hamt, ferry.trans);
+			ferry.hamt = Trie.put(key, value, ferry.hamt, ferry.trans);
 
 		return ferry
 	}
 
 	, filterWithKeyFn(ferry, key, value) {
 		if (ferry.fn(key, value))
-			ferry.map = Trie.put(0, hash(key), key, value, ferry.hamt, ferry.trans);
+			ferry.hamt = Trie.put(key, value, ferry.hamt, ferry.trans);
 
 		return ferry
 	}
@@ -1456,7 +1498,7 @@ var Map$1 = {
 	}
 
 	, of(key, value) {
-		return Trie.put(0, hash(key), key, value, EMPTY$1, null)
+		return Trie.put(key, value, EMPTY$1, null)
 	}
 
 	, initialize(size, fn) {
@@ -1465,16 +1507,16 @@ var Map$1 = {
 
 		for (var i = 0; size > i; i++) {
 			var { key, value } = fn(i);
-			Trie.put(0, hash(key), key, value, hamt, trans);
+			hamt = Trie.put(key, value, hamt, trans);
 		}
 
 		return hamt
 	}
-
-	, put(key, value, node = EMPTY$1, transaction) {
-
-		return Trie.put(0, hash(key), key, value, node, Transaction.start(transaction))
-	}
+	, put: Trie.put.bind(Trie)
+	// , put(key, value, node = EMPTY, transaction) {
+	//
+	// 	return Trie.putWithHash(0, createHash(key), key, value, node, Transaction.start(transaction))
+	// }
 
 	, remove(key, node, transaction) {
 
@@ -1516,12 +1558,25 @@ var Map$1 = {
 
 	, merge(target, src) {
 		return Trie.kvreduce<Reducer.FastFerry>((ferry, key, value) => {
-			ferry.hamt = Trie.put(0, hash(key), key, value, ferry.hamt, ferry.trans);
+			ferry.hamt = Trie.put(key, value, ferry.hamt, ferry.trans);
 			return ferry
 		}, { hamt: target, trans: Transaction() }, src).hamt
 	}
 
 };
+
+Object.assign(Node$1.prototype, {
+	lookup: Trie.lookup.bind(Trie)
+
+	, get: function(key, notFound) {
+		return this.lookup(key, this, notFound)
+	}
+
+	, _put: Trie.put.bind(Trie)
+	, put: function(key, value) {
+		return this._put(key, value, this)
+	}
+});
 
 'use strict';
 
@@ -1568,22 +1623,6 @@ function hash$1(str) {
 	return hash;
 }
 
-/* Bit Ops
- ******************************************************************************/
-/**
- Hamming weight.
-
- Taken from: http://jsperf.com/hamming-weight
- */
-function popcount(x) {
-	x -= x >> 1 & 0x55555555;
-	x = (x & 0x33333333) + (x >> 2 & 0x33333333);
-	x = x + (x >> 4) & 0x0f0f0f0f;
-	x += x >> 8;
-	x += x >> 16;
-	return x & 0x7f;
-}
-
 function hashFragment(shift, h) {
 	return h >>> shift & MASK;
 }
@@ -1593,7 +1632,10 @@ function toBitmap(x) {
 }
 
 function fromBitmap(bitmap, bit) {
-	return popcount(bitmap & bit - 1);
+	var v = bitmap & (bit - 1);
+	v = v - ((v >> 1) & 0x55555555);
+	v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
+	return ((v + (v >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
 }
 
 /**
@@ -1936,11 +1978,11 @@ function tryGetHash(alt, hash, key, map) {
 	var shift = 0;
 	while (true) {
 		switch (node.type) {
-			case LEAF:
+			case 1: //leaf
 			{
 				return key === node.key ? node.value : alt;
 			}
-			case COLLISION:
+			case 2: //collision
 			{
 				if (hash === node.hash) {
 					var children = node.children;
@@ -1951,20 +1993,26 @@ function tryGetHash(alt, hash, key, map) {
 				}
 				return alt;
 			}
-			case INDEX:
+			case 3: //indexed
 			{
-				var frag = hashFragment(shift, hash);
-				var bit = toBitmap(frag);
+
+				var bit = 1 << (hash >>> shift & 31);
 				if (node.mask & bit) {
-					node = node.children[fromBitmap(node.mask, bit)];
+
+					var v = node.mask & (bit - 1);
+					v = v - ((v >> 1) & 0x55555555);
+					v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
+					v = ((v + (v >> 4) & 0xF0F0F0F) * 0x1010101) >> 24;
+
+					node = node.children[v];
 					shift += SIZE;
 					break;
 				}
 				return alt;
 			}
-			case ARRAY:
+			case 4: //array
 			{
-				node = node.children[hashFragment(shift, hash)];
+				node = node.children[(hash >>> shift & 31)];
 				if (node) {
 					shift += SIZE;
 					break;
@@ -1977,15 +2025,6 @@ function tryGetHash(alt, hash, key, map) {
 	}
 }
 
-
-/**
- Lookup the value for `key` in `map` using internal hash function.
-
- @see `tryGetHash`
- */
-function tryGet(alt, key, map) {
-	return tryGetHash(alt, hash$1(key), key, map);
-}
 
 /**
  Lookup the value for `key` in `map` using a custom `hash`.
@@ -2343,13 +2382,13 @@ Object.assign(Map$2.prototype, {
 		return hasHash(hash, key, this);
 	}
 	, get: function (key, alt) {
-		return tryGet(alt, key, this);
+		return tryGetHash(alt, hash$1(key), key, this);
 	}
 	, getHash: function (hash, key) {
 		return getHash(hash, key, this);
 	}
 	, tryGet: function (alt, key) {
-		return tryGet(alt, key, this);
+		return tryGetHash(alt, hash$1(key), key, this);
 	}
 	, tryGetHash: function(alt, hash, key) {
 		return tryGetHash(alt, hash, key, this);
