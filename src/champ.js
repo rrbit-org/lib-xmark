@@ -172,10 +172,12 @@ function MapEntry(key, value) {
 	this.value = value;
 }
 
+var INDEXED_NODE = 0;
+var COLLISION_NODE = 1;
 
 /**
  *
- * @param type - node type ('IndexedNode'|'CollisionNode')
+ * @param type - node type (INDEXED_NODE|COLLISION_NODE)
  * @param owner - any object which can represent the current
  * transaction. used to detect if mutation optimizations are
  * allowed
@@ -188,7 +190,7 @@ function MapEntry(key, value) {
 function Node<K,V>(type, owner: Transaction, data: Array<K|V>, hash: number, altHash: number, length: number) {
 
 
-	if (type === 'IndexedNode') {
+	if (type === INDEXED_NODE) {
 		this.dataMap = hash;
 		this.nodeMap = altHash;
 	} else { // CollisionNode
@@ -202,11 +204,11 @@ function Node<K,V>(type, owner: Transaction, data: Array<K|V>, hash: number, alt
 }
 
 function IndexedNode(owner, dataMap: number, nodeMap: number, items: Array): Node {
-	return new Node('IndexedNode', owner, items, dataMap, nodeMap, 0)
+	return new Node(INDEXED_NODE, owner, items, dataMap, nodeMap, 0)
 }
 
 function CollisionNode(owner, hash, length, items: Array): Node {
-	return new Node('CollisionNode', owner, items, hash, 0, length)
+	return new Node(COLLISION_NODE, owner, items, hash, 0, length)
 }
 
 
@@ -216,7 +218,7 @@ var Trie = {
 
 	// useful when attempting to squash
 	, isSingle(node: Node) {
-		if (node.type === 'CollisionNode')
+		if (node.type === COLLISION_NODE)
 			return node.length === 1;
 		return (this.popcount(node.dataMap) === 2) && (node.nodeMap === 0)
 	}
@@ -235,7 +237,7 @@ var Trie = {
 		while (node) {
 			data = node.data
 
-			if (node.type === 'CollisionNode') {
+			if (node.type === COLLISION_NODE) {
 				return this._lookupCollision(key, data, notFound)
 			}
 
@@ -398,7 +400,7 @@ var Trie = {
 	}
 
 	, put(shift, hash, key, value, node, edit) {
-		if (node.type === 'CollisionNode')
+		if (node.type === COLLISION_NODE)
 			return this._collisionPut(shift, hash, key, value, node, edit)
 
 		return this._indexedPut(shift, hash, key, value, node, edit)
@@ -466,7 +468,7 @@ var Trie = {
 	}
 
 	, remove(shift: number, hash: number, key, node: Node, edit): Node {
-		if (node.type === 'IndexedNode')
+		if (node.type === INDEXED_NODE)
 			return this._indexedRemove(shift, hash, key, node, edit);
 
 		// Collision Node
@@ -495,7 +497,7 @@ var Trie = {
 	, kvreduce<T>(fn, seed: T, node: Node): T {
 		var data = node.data
 
-		if (node.type === 'IndexedNode') {
+		if (node.type === INDEXED_NODE) {
 			var entryLen = (2 * this.popcount(node.dataMap));
 			var nodeLen = entryLen + this.popcount(node.nodeMap);
 
@@ -524,7 +526,7 @@ var Trie = {
 	, iterator: function* iterator(node) {
 		var data = node.data
 
-		if (node.type === 'IndexedNode') {
+		if (node.type === INDEXED_NODE) {
 			var entryLen = (2 * this.popcount(node.dataMap));
 			var nodeLen = entryLen + this.popcount(node.nodeMap);
 
