@@ -1752,7 +1752,13 @@ function MapEntry$2(key, value) {
 var INDEXED_NODE$2 = 0;
 var COLLISION_NODE$2 = 1;
 
-function IndexedNode$2(owner, dataMap        , nodeMap        , items       )       {
+function IronMap(trie, length) {
+	this.trie = trie;
+	this.length = length;
+}
+
+
+function IndexedNode$2(owner, dataMap        , nodeMap        , items       ) {
 	// return new _IndexedNode(owner, dataMap, nodeMap, items)
 
 	this.data = items;
@@ -1761,7 +1767,7 @@ function IndexedNode$2(owner, dataMap        , nodeMap        , items       )   
 	this.edit = owner;
 }
 
-function CollisionNode$2(owner, hash$$1, length, items       )       {
+function CollisionNode$2(owner, hash$$1, length, items       ) {
 	// return new Node(COLLISION_NODE, owner, items, hash, 0, length)
 	// return new _CollisionNode(owner, hash, length, items)
 
@@ -1775,7 +1781,7 @@ Object.assign(IndexedNode$2.prototype, Arrays$2, Bitwise$2, Transaction$1, {
 	createHash: hash,
 
 	// = update/append =================================================================================
-	isSingle(node      ) {
+	isSingle(node) {
 		if (node.type === COLLISION_NODE$2)
 			return node.length === 1;
 		return (this.popcount(node.dataMap) === 2) && (node.nodeMap === 0)
@@ -2196,36 +2202,50 @@ var Reducer$1 = {
 
 var Map$2 = {
 	empty() {
+		//todo: return empty IronMap
 		return EMPTY$2;
 	}
 
 	, of(key, value) {
-		return Trie$1.put(key, value, EMPTY$2, null)
+		return new IronMap(EMPTY$2.put(key, value, null), 1)
 	}
 
 	, initialize(size, fn) {
-		var hamt = EMPTY$2;
+		var trie = EMPTY$2;
 		var trans = Transaction$1.start();
 
 		for (var i = 0; size > i; i++) {
 			var { key, value } = fn(i);
-			hamt = Trie$1.put(key, value, hamt, trans);
+			trie = trie.put(key, value, trie, trans);
 		}
 
-		return hamt
+		return trie
 	}
-	, put: (key, value, trie, transaction) => trie.put(key, value, transaction)
+	, put: (key, value, map, edit) => {
+		edit = Transaction$1.start(edit);
+		var trie = map.trie;
+		var newTrie = trie.put(key, value, edit);
+		if (newTrie === trie)
+			return map;
 
-	, remove(key, node, transaction) {
+		return new IronMap(newTrie, edit.isLengthDifferent ? map.length + 1 : map.length)
+	}
 
-		return Trie$1.remove(0, hash(key), key, node, Transaction$1.start(transaction));
+	, remove(key, map, edit) {
+		edit = Transaction$1.start(edit);
+		var trie = map.trie;
+		var newTrie = trie.remove(key, edit);
+		if (trie === newTrie)
+			return map;
+		return new IronMap(newTrie, edit.isLengthDifferent ? map.length - 1 : map.length)
 	}
 
 	, lookup: Trie$1.lookup.bind(Trie$1)
+	, get: Trie$1.lookup.bind(Trie$1)
 
-	, includes(key, trie) {
+	, includes(key, map) {
 		var NOT_FOUND = {};
-		return Trie$1.lookup(key, trie, NOT_FOUND) !== NOT_FOUND
+		return map.trie.get(key, NOT_FOUND) !== NOT_FOUND
 	}
 
 	, iterator: Trie$1.iterator
@@ -2238,23 +2258,28 @@ var Map$2 = {
 	, reduceWithKey: Trie$1.kvreduce
 
 	, map(fn, trie) {
+		//todo: return empty IronMap
 		return Trie$1.kvreduce(Reducer$1.mapFn, Reducer$1.FastFerry(fn), trie).hamt
 	}
 
 	, mapWithKey(fn, trie) {
+		//todo: return empty IronMap
 		return Trie$1.kvreduce(Reducer$1.mapWithKeyFn, Reducer$1.FastFerry(fn), trie).hamt
 	}
 
 	, filter(fn, trie) {
+		//todo: return empty IronMap
 		return Trie$1.kvreduce(Reducer$1.filterFn
 			, Reducer$1.FastFerry(fn)
 			, trie).hamt
 	}
 	, filterWithKey(fn, trie) {
+		//todo: return empty IronMap
 		return Trie$1.kvreduce(Reducer$1.filterWithKeyFn, Reducer$1.FastFerry(fn), trie).hamt
 	}
 
 	, merge(target, src) {
+		//todo: return empty IronMap
 		return Trie$1.kvreduce((ferry, key, value) => {
 			ferry.hamt = ferry.hamt.put(key, value, ferry.hamt, ferry.trans);
 			return ferry
